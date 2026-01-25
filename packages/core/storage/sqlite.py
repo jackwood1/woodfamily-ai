@@ -6,7 +6,7 @@ import sqlite3
 import uuid
 from typing import List, Optional
 
-from .base import ListItem, ListStore, ThreadState
+from .base import ListItem, ListStore, ReminderState, ThreadState
 
 
 class SQLiteListStore(ListStore):
@@ -53,6 +53,25 @@ class SQLiteListStore(ListStore):
                     id TEXT PRIMARY KEY,
                     summary TEXT NOT NULL,
                     recent_messages TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS reminders (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    description TEXT,
+                    cron TEXT NOT NULL,
+                    timezone TEXT NOT NULL,
+                    email TEXT,
+                    sms_phone TEXT,
+                    sms_gateway_domain TEXT,
+                    active INTEGER NOT NULL,
+                    last_sent_at TEXT,
+                    next_run_at TEXT,
+                    created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )
                 """
@@ -173,3 +192,167 @@ class SQLiteListStore(ListStore):
                 """,
                 (thread_id, summary, json.dumps(recent_messages)),
             )
+
+    def create_reminder(self, reminder: ReminderState) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO reminders (
+                    id, title, description, cron, timezone, email, sms_phone,
+                    sms_gateway_domain, active, last_sent_at, next_run_at,
+                    created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    reminder.id,
+                    reminder.title,
+                    reminder.description,
+                    reminder.cron,
+                    reminder.timezone,
+                    reminder.email,
+                    reminder.sms_phone,
+                    reminder.sms_gateway_domain,
+                    1 if reminder.active else 0,
+                    reminder.last_sent_at,
+                    reminder.next_run_at,
+                    reminder.created_at,
+                    reminder.updated_at,
+                ),
+            )
+
+    def update_reminder(self, reminder: ReminderState) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE reminders
+                SET title = ?, description = ?, cron = ?, timezone = ?, email = ?,
+                    sms_phone = ?, sms_gateway_domain = ?, active = ?,
+                    last_sent_at = ?, next_run_at = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    reminder.title,
+                    reminder.description,
+                    reminder.cron,
+                    reminder.timezone,
+                    reminder.email,
+                    reminder.sms_phone,
+                    reminder.sms_gateway_domain,
+                    1 if reminder.active else 0,
+                    reminder.last_sent_at,
+                    reminder.next_run_at,
+                    reminder.updated_at,
+                    reminder.id,
+                ),
+            )
+
+    def get_reminder(self, reminder_id: str) -> Optional[ReminderState]:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id, title, description, cron, timezone, email, sms_phone,
+                       sms_gateway_domain, active, last_sent_at, next_run_at,
+                       created_at, updated_at
+                FROM reminders
+                WHERE id = ?
+                """,
+                (reminder_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            return ReminderState(
+                id=row[0],
+                title=row[1],
+                description=row[2],
+                cron=row[3],
+                timezone=row[4],
+                email=row[5],
+                sms_phone=row[6],
+                sms_gateway_domain=row[7],
+                active=bool(row[8]),
+                last_sent_at=row[9],
+                next_run_at=row[10],
+                created_at=row[11],
+                updated_at=row[12],
+            )
+
+    def list_reminders(self, active_only: bool = False) -> List[ReminderState]:
+        with self._connect() as conn:
+            if active_only:
+                rows = conn.execute(
+                    """
+                    SELECT id, title, description, cron, timezone, email, sms_phone,
+                           sms_gateway_domain, active, last_sent_at, next_run_at,
+                           created_at, updated_at
+                    FROM reminders
+                    WHERE active = 1
+                    ORDER BY created_at DESC
+                    """
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT id, title, description, cron, timezone, email, sms_phone,
+                           sms_gateway_domain, active, last_sent_at, next_run_at,
+                           created_at, updated_at
+                    FROM reminders
+                    ORDER BY created_at DESC
+                    """
+                ).fetchall()
+            return [
+                ReminderState(
+                    id=row[0],
+                    title=row[1],
+                    description=row[2],
+                    cron=row[3],
+                    timezone=row[4],
+                    email=row[5],
+                    sms_phone=row[6],
+                    sms_gateway_domain=row[7],
+                    active=bool(row[8]),
+                    last_sent_at=row[9],
+                    next_run_at=row[10],
+                    created_at=row[11],
+                    updated_at=row[12],
+                )
+                for row in rows
+            ]
+
+    def delete_reminder(self, reminder_id: str) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM reminders WHERE id = ?", (reminder_id,))
+
+    def list_due_reminders(self, now_iso: str) -> List[ReminderState]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, title, description, cron, timezone, email, sms_phone,
+                       sms_gateway_domain, active, last_sent_at, next_run_at,
+                       created_at, updated_at
+                FROM reminders
+                WHERE active = 1
+                  AND next_run_at IS NOT NULL
+                  AND next_run_at <= ?
+                ORDER BY next_run_at ASC
+                """,
+                (now_iso,),
+            ).fetchall()
+            return [
+                ReminderState(
+                    id=row[0],
+                    title=row[1],
+                    description=row[2],
+                    cron=row[3],
+                    timezone=row[4],
+                    email=row[5],
+                    sms_phone=row[6],
+                    sms_gateway_domain=row[7],
+                    active=bool(row[8]),
+                    last_sent_at=row[9],
+                    next_run_at=row[10],
+                    created_at=row[11],
+                    updated_at=row[12],
+                )
+                for row in rows
+            ]

@@ -55,6 +55,10 @@ export default function HomePage() {
       <header className="header">
         <h1>Home Ops Copilot</h1>
         <p>Test the `/chat` endpoint and inspect tool calls.</p>
+        <p>
+          Reminders live at <code>/reminders</code> and are managed via the API
+          for now.
+        </p>
       </header>
 
       <form className="card" onSubmit={handleSubmit}>

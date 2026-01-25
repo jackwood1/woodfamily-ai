@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,6 +12,9 @@ except Exception:  # pragma: no cover - optional dependency resolution
     FastAPIInstrumentor = None
 
 from apps.api.routes.chat import router as chat_router
+from apps.api.routes.reminders import router as reminders_router
+from apps.api.reminders_scheduler import start_scheduler
+from packages.core.storage.sqlite import SQLiteListStore
 from apps.api.observability import init_observability
 
 
@@ -33,3 +37,19 @@ else:
         "Install observability dependencies to enable tracing."
     )
 app.include_router(chat_router)
+app.include_router(reminders_router)
+
+_SCHEDULER = None
+
+
+@app.on_event("startup")
+def _start_reminder_scheduler() -> None:
+    global _SCHEDULER
+    if os.getenv("REMINDERS_SCHEDULER_ENABLED", "true").lower() != "true":
+        return
+    if _SCHEDULER is not None:
+        return
+    data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "data"))
+    db_path = os.path.join(data_dir, "lists.db")
+    store = SQLiteListStore(db_path=db_path)
+    _SCHEDULER = start_scheduler(store)

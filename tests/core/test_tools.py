@@ -45,3 +45,14 @@ def test_list_tools_normalize_and_dedupe(tmp_path):
 
     items = get_list(store, "GROCERIES")
     assert items["items"] == ["Milk"]
+
+
+def test_list_tools_create_list_normalizes_name(tmp_path):
+    store = SQLiteListStore(db_path=str(tmp_path / "lists.db"))
+
+    first = create_list(store, "  Groceries  ")
+    assert first["status"] == "created"
+    assert first["list_name"] == "groceries"
+
+    second = create_list(store, "GROCERIES")
+    assert second["status"] == "exists"
