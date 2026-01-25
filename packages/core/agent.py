@@ -26,8 +26,9 @@ class HomeOpsAgent:
     def chat(self, message: str) -> Dict[str, Any]:
         system_prompt = (
             "You are Home Ops Copilot for woodfamily.ai. "
-            "You can manage household lists using the available tools. "
-            "Use tools when needed, then respond with a helpful summary."
+            "You manage household lists using the available tools. "
+            "When the user asks to create/add/get a list, use tools. "
+            "After using tools, respond with a helpful summary."
         )
         messages: List[Dict[str, Any]] = [
             {"role": "system", "content": system_prompt},
@@ -58,25 +59,58 @@ class HomeOpsAgent:
                     }
                 )
                 for call in tool_calls:
-                    tool_name = call.get("function", {}).get("name")
-                    raw_args = call.get("function", {}).get("arguments", "{}")
+                    tool_name = (call.get("function") or {}).get("name")
+                    raw_args = ((call.get("function") or {}).get("arguments") or "").strip()
+                    if raw_args.startswith("```"):
+                        lines = raw_args.splitlines()
+                        if lines and lines[0].startswith("```"):
+                            lines = lines[1:]
+                        if lines and lines[-1].startswith("```"):
+                            lines = lines[:-1]
+                        raw_args = "\n".join(lines).strip()
                     try:
                         parsed_args = json.loads(raw_args) if raw_args else {}
                     except json.JSONDecodeError:
-                        parsed_args = {}
-                    span_context = (
-                        self._tracer.start_as_current_span(
-                            "tool.call",
-                            attributes={
-                                "tool.name": tool_name,
-                                "tool.args": json.dumps(parsed_args),
-                            },
+                        self._logger.warning(
+                            "tool_args_json_decode_failed tool=%s raw=%r",
+                            tool_name,
+                            raw_args,
                         )
-                        if self._tracer
-                        else nullcontext()
-                    )
-                    with span_context:
-                        result = self._registry.call(tool_name, parsed_args)
+                        parsed_args = {}
+                    if not tool_name or not self._registry.has_tool(tool_name):
+                        result = {
+                            "status": "error",
+                            "error": "unknown_tool",
+                            "tool_name": tool_name,
+                        }
+                    else:
+                        try:
+                            span_context = (
+                                self._tracer.start_as_current_span(
+                                    "tool.call",
+                                    attributes={
+                                        "tool.name": tool_name,
+                                        "tool.args": json.dumps(parsed_args),
+                                    },
+                                )
+                                if self._tracer
+                                else nullcontext()
+                            )
+                            with span_context:
+                                result = self._registry.call(tool_name, parsed_args)
+                        except Exception as exc:
+                            self._logger.exception(
+                                "tool_failed name=%s args=%s error=%s",
+                                tool_name,
+                                parsed_args,
+                                exc,
+                            )
+                            result = {
+                                "status": "error",
+                                "error": "tool_failed",
+                                "message": str(exc),
+                                "tool_name": tool_name,
+                            }
                     self._logger.info(
                         "tool_call name=%s args=%s result=%s",
                         tool_name,

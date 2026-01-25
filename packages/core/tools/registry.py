@@ -33,6 +33,9 @@ class ToolRegistry:
             return {"status": "error", "error": "unknown_tool", "tool_name": name}
         return self._tools[name].handler(args)
 
+    def has_tool(self, name: str) -> bool:
+        return name in self._tools
+
     def list_tools(self) -> List[str]:
         return list(self._tools.keys())
 

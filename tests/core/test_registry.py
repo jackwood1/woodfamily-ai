@@ -8,6 +8,8 @@ def test_registry_lists_and_schemas(tmp_path):
 
     tool_names = registry.list_tools()
     assert set(tool_names) == {"create_list", "add_item", "get_list"}
+    assert registry.has_tool("create_list") is True
+    assert registry.has_tool("unknown") is False
 
     schemas = registry.get_tool_schemas()
     assert len(schemas) == 3
