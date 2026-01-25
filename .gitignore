@@ -3,3 +3,5 @@
 __pycache__/
 *.pyc
 apps/api/data/
+apps/web/node_modules/
+apps/web/.next/

@@ -4,6 +4,8 @@ import json
 import logging
 from typing import Any, Dict, List
 
+from opentelemetry import trace
+
 from .llm.openai_client import OpenAIClient
 from .storage.base import ListStore
 from .tools.registry import build_list_tool_registry
@@ -15,6 +17,7 @@ class HomeOpsAgent:
         self._llm = llm
         self._registry = build_list_tool_registry(store)
         self._logger = logging.getLogger("home_ops.agent")
+        self._tracer = trace.get_tracer("home_ops.agent")
 
     def chat(self, message: str) -> Dict[str, Any]:
         system_prompt = (
@@ -50,7 +53,14 @@ class HomeOpsAgent:
                         parsed_args = json.loads(raw_args) if raw_args else {}
                     except json.JSONDecodeError:
                         parsed_args = {}
-                    result = self._registry.call(tool_name, parsed_args)
+                    with self._tracer.start_as_current_span(
+                        "tool.call",
+                        attributes={
+                            "tool.name": tool_name,
+                            "tool.args": json.dumps(parsed_args),
+                        },
+                    ):
+                        result = self._registry.call(tool_name, parsed_args)
                     self._logger.info(
                         "tool_call name=%s args=%s result=%s",
                         tool_name,

@@ -6,6 +6,8 @@ import urllib.error
 import urllib.request
 from typing import Any, Dict, List, Optional
 
+from opentelemetry import trace
+
 
 class OpenAIClient:
     def __init__(
@@ -17,6 +19,7 @@ class OpenAIClient:
         self._api_key = api_key or os.getenv("OPENAI_API_KEY")
         self._base_url = base_url.rstrip("/")
         self._model = model
+        self._tracer = trace.get_tracer("home_ops.llm")
 
     def chat(
         self,
@@ -44,12 +47,19 @@ class OpenAIClient:
             method="POST",
         )
 
-        try:
-            with urllib.request.urlopen(request, timeout=30) as response:
-                body = response.read().decode("utf-8")
-                return json.loads(body)
-        except urllib.error.HTTPError as exc:
-            body = exc.read().decode("utf-8") if exc.fp else ""
-            raise RuntimeError(
-                f"OpenAI HTTP {exc.code} error: {body or exc.reason}"
-            ) from exc
+        with self._tracer.start_as_current_span(
+            "openai.chat",
+            attributes={
+                "llm.model": self._model,
+                "llm.base_url": self._base_url,
+            },
+        ):
+            try:
+                with urllib.request.urlopen(request, timeout=30) as response:
+                    body = response.read().decode("utf-8")
+                    return json.loads(body)
+            except urllib.error.HTTPError as exc:
+                body = exc.read().decode("utf-8") if exc.fp else ""
+                raise RuntimeError(
+                    f"OpenAI HTTP {exc.code} error: {body or exc.reason}"
+                ) from exc
