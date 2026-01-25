@@ -70,3 +70,4 @@ def test_agent_tool_loop(tmp_path):
     assert len(result["tool_calls"]) == 2
     assert result["tool_calls"][0]["name"] == "create_list"
     assert result["tool_calls"][1]["name"] == "add_item"
+    assert result["thread_id"]

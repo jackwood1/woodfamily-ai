@@ -7,11 +7,11 @@ import React from "react";
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 
-async function sendChat(message) {
+async function sendChat(message, threadId) {
   const response = await fetch(`${API_BASE_URL}/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ message, thread_id: threadId || null }),
   });
 
   if (!response.ok) {
@@ -27,15 +27,19 @@ export default function HomePage() {
     event.preventDefault();
     const form = event.currentTarget;
     const message = form.message.value.trim();
+    const threadId = form.threadId.value.trim();
     if (!message) {
       return;
     }
 
     form.status.value = "Sending...";
     try {
-      const result = await sendChat(message);
+      const result = await sendChat(message, threadId);
       form.reply.value = result.reply || "";
       form.toolCalls.value = JSON.stringify(result.tool_calls || [], null, 2);
+      if (result.thread_id) {
+        form.threadId.value = result.thread_id;
+      }
     } catch (error) {
       form.reply.value = "";
       form.toolCalls.value = "";
@@ -54,6 +58,16 @@ export default function HomePage() {
       </header>
 
       <form className="card" onSubmit={handleSubmit}>
+        <label className="label" htmlFor="threadId">
+          Thread ID
+        </label>
+        <input
+          id="threadId"
+          name="threadId"
+          placeholder="Leave blank to start a new thread"
+          className="input"
+        />
+
         <label className="label" htmlFor="message">
           Message
         </label>

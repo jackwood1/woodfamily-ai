@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from contextlib import nullcontext
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 try:
     from opentelemetry import trace
@@ -11,7 +11,7 @@ except Exception:  # pragma: no cover - optional dependency resolution
     trace = None
 
 from .llm.openai_client import OpenAIClient
-from .storage.base import ListStore
+from .storage.base import ListStore, ThreadStore, ThreadState
 from .tools.registry import build_list_tool_registry
 
 
@@ -23,17 +23,29 @@ class HomeOpsAgent:
         self._logger = logging.getLogger("home_ops.agent")
         self._tracer = trace.get_tracer("home_ops.agent") if trace else None
 
-    def chat(self, message: str) -> Dict[str, Any]:
+    def chat(self, message: str, thread_id: Optional[str] = None) -> Dict[str, Any]:
         system_prompt = (
             "You are Home Ops Copilot for woodfamily.ai. "
             "You manage household lists using the available tools. "
             "When the user asks to create/add/get a list, use tools. "
             "After using tools, respond with a helpful summary."
         )
-        messages: List[Dict[str, Any]] = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": message},
-        ]
+        thread_state: Optional[ThreadState] = None
+        if isinstance(self._store, ThreadStore):
+            thread_id = self._store.create_thread(thread_id)
+            thread_state = self._store.get_thread(thread_id)
+
+        messages: List[Dict[str, Any]] = [{"role": "system", "content": system_prompt}]
+        if thread_state and thread_state.summary:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": f"Conversation summary: {thread_state.summary}",
+                }
+            )
+        if thread_state and thread_state.recent_messages:
+            messages.extend(thread_state.recent_messages)
+        messages.append({"role": "user", "content": message})
         tool_calls_meta: List[Dict[str, Any]] = []
         tools = self._registry.get_tool_schemas()
 
@@ -45,6 +57,7 @@ class HomeOpsAgent:
                 return {
                     "reply": "The LLM request failed. Check server logs for details.",
                     "tool_calls": tool_calls_meta,
+                    "thread_id": thread_id,
                 }
             choice = response.get("choices", [{}])[0]
             msg = choice.get("message", {})
@@ -136,9 +149,48 @@ class HomeOpsAgent:
                 continue
 
             content = msg.get("content") or ""
-            return {"reply": content, "tool_calls": tool_calls_meta}
+            response_payload = {
+                "reply": content,
+                "tool_calls": tool_calls_meta,
+                "thread_id": thread_id,
+            }
+            self._maybe_update_thread(thread_id, messages, message, content)
+            return response_payload
 
-        return {
+        response_payload = {
             "reply": "I couldn't complete the request right now.",
             "tool_calls": tool_calls_meta,
+            "thread_id": thread_id,
         }
+        self._maybe_update_thread(thread_id, messages, message, response_payload["reply"])
+        return response_payload
+
+    def _maybe_update_thread(
+        self,
+        thread_id: Optional[str],
+        messages: List[Dict[str, Any]],
+        user_message: str,
+        assistant_reply: str,
+    ) -> None:
+        if not thread_id or not isinstance(self._store, ThreadStore):
+            return
+        thread_state = self._store.get_thread(thread_id)
+        if thread_state is None:
+            return
+
+        recent_messages = [
+            msg for msg in thread_state.recent_messages if msg.get("role") in {"user", "assistant"}
+        ]
+        recent_messages.append({"role": "user", "content": user_message})
+        recent_messages.append({"role": "assistant", "content": assistant_reply})
+        recent_messages = recent_messages[-10:]
+
+        summary = thread_state.summary.strip()
+        if not summary:
+            summary = f"Recent: {user_message} -> {assistant_reply}"
+        else:
+            summary = f"{summary} | {user_message} -> {assistant_reply}"
+        if len(summary) > 1000:
+            summary = summary[-1000:]
+
+        self._store.update_thread(thread_id, summary, recent_messages)

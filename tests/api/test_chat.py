@@ -5,10 +5,11 @@ from apps.api.routes import chat as chat_module
 
 
 class DummyAgent:
-    def chat(self, message: str):
+    def chat(self, message: str, thread_id=None):
         return {
             "reply": f"Echo: {message}",
             "tool_calls": [{"name": "noop", "args": {}, "result": {}}],
+            "thread_id": thread_id or "thread-123",
         }
 
 
@@ -21,3 +22,4 @@ def test_chat_route(monkeypatch):
     payload = response.json()
     assert payload["reply"] == "Echo: hello"
     assert payload["tool_calls"][0]["name"] == "noop"
+    assert payload["thread_id"] == "thread-123"

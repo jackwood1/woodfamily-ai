@@ -29,4 +29,4 @@ _AGENT = _build_agent()
 
 @router.post("/chat", response_model=ChatResponse)
 def chat(payload: ChatRequest) -> Dict[str, Any]:
-    return _AGENT.chat(payload.message)
+    return _AGENT.chat(payload.message, thread_id=payload.thread_id)

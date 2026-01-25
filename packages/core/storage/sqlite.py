@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
+import uuid
 from typing import List, Optional
 
-from .base import ListItem, ListStore
+from .base import ListItem, ListStore, ThreadState
 
 
 class SQLiteListStore(ListStore):
@@ -32,6 +34,16 @@ class SQLiteListStore(ListStore):
                     list_name TEXT NOT NULL,
                     item TEXT NOT NULL,
                     FOREIGN KEY(list_name) REFERENCES lists(name)
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS threads (
+                    id TEXT PRIMARY KEY,
+                    summary TEXT NOT NULL,
+                    recent_messages TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
                 )
                 """
             )
@@ -68,3 +80,44 @@ class SQLiteListStore(ListStore):
                 (list_name,),
             ).fetchall()
             return [ListItem(list_name=list_name, item=row[0]) for row in rows]
+
+    def create_thread(self, thread_id: Optional[str] = None) -> str:
+        thread_id = thread_id or str(uuid.uuid4())
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO threads (id, summary, recent_messages, updated_at)
+                VALUES (?, ?, ?, datetime('now'))
+                """,
+                (thread_id, "", "[]"),
+            )
+        return thread_id
+
+    def get_thread(self, thread_id: str) -> Optional[ThreadState]:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT summary, recent_messages FROM threads WHERE id = ?",
+                (thread_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            summary, recent_messages = row
+            return ThreadState(
+                thread_id=thread_id,
+                summary=summary or "",
+                recent_messages=json.loads(recent_messages or "[]"),
+            )
+
+    def update_thread(self, thread_id: str, summary: str, recent_messages: List[dict]) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO threads (id, summary, recent_messages, updated_at)
+                VALUES (?, ?, ?, datetime('now'))
+                ON CONFLICT(id) DO UPDATE SET
+                    summary = excluded.summary,
+                    recent_messages = excluded.recent_messages,
+                    updated_at = excluded.updated_at
+                """,
+                (thread_id, summary, json.dumps(recent_messages)),
+            )
