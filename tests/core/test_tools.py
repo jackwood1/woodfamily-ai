@@ -10,6 +10,7 @@ def test_list_tools_happy_path(tmp_path):
 
     result = add_item(store, "chores", "laundry")
     assert result["status"] == "ok"
+    assert result["list_created"] is False
 
     result = get_list(store, "chores")
     assert result["status"] == "ok"
@@ -20,9 +21,9 @@ def test_list_tools_missing_list(tmp_path):
     store = SQLiteListStore(db_path=str(tmp_path / "lists.db"))
 
     result = add_item(store, "missing", "item")
-    assert result["status"] == "error"
-    assert result["error"] == "list_not_found"
+    assert result["status"] == "ok"
+    assert result["list_created"] is True
 
     result = get_list(store, "missing")
-    assert result["status"] == "error"
-    assert result["error"] == "list_not_found"
+    assert result["status"] == "ok"
+    assert result["items"] == ["item"]

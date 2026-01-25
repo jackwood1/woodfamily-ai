@@ -50,6 +50,13 @@ class HomeOpsAgent:
             tool_calls = msg.get("tool_calls") or []
 
             if tool_calls:
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": msg.get("content"),
+                        "tool_calls": tool_calls,
+                    }
+                )
                 for call in tool_calls:
                     tool_name = call.get("function", {}).get("name")
                     raw_args = call.get("function", {}).get("arguments", "{}")

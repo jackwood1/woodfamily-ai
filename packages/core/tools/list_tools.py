@@ -20,12 +20,16 @@ def add_item(store: ListStore, list_name: str, item: str) -> Dict[str, Any]:
             "status": "ok",
             "list_name": list_name,
             "item": item,
+            "list_created": False,
         }
     except ValueError:
+        store.create_list(list_name)
+        store.add_item(list_name, item)
         return {
-            "status": "error",
-            "error": "list_not_found",
+            "status": "ok",
             "list_name": list_name,
+            "item": item,
+            "list_created": True,
         }
 
 
