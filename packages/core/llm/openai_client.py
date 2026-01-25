@@ -4,9 +4,13 @@ import json
 import os
 import urllib.error
 import urllib.request
+from contextlib import nullcontext
 from typing import Any, Dict, List, Optional
 
-from opentelemetry import trace
+try:
+    from opentelemetry import trace
+except Exception:  # pragma: no cover - optional dependency resolution
+    trace = None
 
 
 class OpenAIClient:
@@ -19,7 +23,7 @@ class OpenAIClient:
         self._api_key = api_key or os.getenv("OPENAI_API_KEY")
         self._base_url = base_url.rstrip("/")
         self._model = model
-        self._tracer = trace.get_tracer("home_ops.llm")
+        self._tracer = trace.get_tracer("home_ops.llm") if trace else None
 
     def chat(
         self,
@@ -47,13 +51,18 @@ class OpenAIClient:
             method="POST",
         )
 
-        with self._tracer.start_as_current_span(
-            "openai.chat",
-            attributes={
-                "llm.model": self._model,
-                "llm.base_url": self._base_url,
-            },
-        ):
+        span_context = (
+            self._tracer.start_as_current_span(
+                "openai.chat",
+                attributes={
+                    "llm.model": self._model,
+                    "llm.base_url": self._base_url,
+                },
+            )
+            if self._tracer
+            else nullcontext()
+        )
+        with span_context:
             try:
                 with urllib.request.urlopen(request, timeout=30) as response:
                     body = response.read().decode("utf-8")
