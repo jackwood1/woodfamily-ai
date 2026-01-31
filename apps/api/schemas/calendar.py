@@ -10,6 +10,13 @@ class CalendarEventsRequest(BaseModel):
     end: str = Field(..., description="ISO-8601 end datetime")
 
 
+class CalendarCreateRequest(BaseModel):
+    summary: str = Field(..., min_length=1)
+    start: str = Field(..., description="ISO-8601 start datetime")
+    end: str = Field(..., description="ISO-8601 end datetime")
+    description: Optional[str] = None
+
+
 class CalendarEventResponse(BaseModel):
     id: str
     title: str

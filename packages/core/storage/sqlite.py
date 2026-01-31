@@ -138,6 +138,44 @@ class SQLiteListStore(ListStore):
                 (list_name, item, item_norm),
             )
 
+    def remove_item(self, list_name: str, item: str) -> bool:
+        list_name = self._normalize_list_name(list_name)
+        item_norm = self._normalize_item(item).lower()
+        with self._connect() as conn:
+            result = conn.execute(
+                "DELETE FROM items WHERE list_name = ? AND item_norm = ?",
+                (list_name, item_norm),
+            )
+            return result.rowcount > 0
+
+    def update_item(self, list_name: str, old_item: str, new_item: str) -> bool:
+        list_name = self._normalize_list_name(list_name)
+        old_norm = self._normalize_item(old_item).lower()
+        new_item_clean = self._normalize_item(new_item)
+        new_norm = new_item_clean.lower()
+        with self._connect() as conn:
+            exists = conn.execute(
+                "SELECT 1 FROM items WHERE list_name = ? AND item_norm = ? LIMIT 1",
+                (list_name, old_norm),
+            ).fetchone()
+            if exists is None:
+                return False
+            if old_norm == new_norm:
+                conn.execute(
+                    "UPDATE items SET item = ?, item_norm = ? WHERE list_name = ? AND item_norm = ?",
+                    (new_item_clean, new_norm, list_name, old_norm),
+                )
+                return True
+            conn.execute(
+                "DELETE FROM items WHERE list_name = ? AND item_norm = ?",
+                (list_name, new_norm),
+            )
+            result = conn.execute(
+                "UPDATE items SET item = ?, item_norm = ? WHERE list_name = ? AND item_norm = ?",
+                (new_item_clean, new_norm, list_name, old_norm),
+            )
+            return result.rowcount > 0
+
     def get_list(self, list_name: str) -> Optional[List[ListItem]]:
         list_name = self._normalize_list_name(list_name)
         with self._connect() as conn:
@@ -151,6 +189,38 @@ class SQLiteListStore(ListStore):
                 (list_name,),
             ).fetchall()
             return [ListItem(list_name=list_name, item=row[0]) for row in rows]
+
+    def list_lists(self) -> List[str]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT name FROM lists ORDER BY name ASC"
+            ).fetchall()
+            return [row[0] for row in rows]
+
+    def delete_list(self, list_name: str) -> bool:
+        list_name = self._normalize_list_name(list_name)
+        with self._connect() as conn:
+            conn.execute("DELETE FROM items WHERE list_name = ?", (list_name,))
+            result = conn.execute("DELETE FROM lists WHERE name = ?", (list_name,))
+            return result.rowcount > 0
+
+    def clear_list(self, list_name: str) -> bool:
+        list_name = self._normalize_list_name(list_name)
+        with self._connect() as conn:
+            exists = conn.execute(
+                "SELECT 1 FROM lists WHERE name = ? LIMIT 1", (list_name,)
+            ).fetchone()
+            if exists is None:
+                return False
+            conn.execute("DELETE FROM items WHERE list_name = ?", (list_name,))
+            return True
+
+    def clear_all_lists(self) -> int:
+        with self._connect() as conn:
+            count = conn.execute("SELECT COUNT(*) FROM lists").fetchone()[0]
+            conn.execute("DELETE FROM items")
+            conn.execute("DELETE FROM lists")
+            return count
 
     def create_thread(self, thread_id: Optional[str] = None) -> str:
         thread_id = thread_id or str(uuid.uuid4())
@@ -192,6 +262,26 @@ class SQLiteListStore(ListStore):
                 """,
                 (thread_id, summary, json.dumps(recent_messages)),
             )
+
+    def list_threads(self, limit: int = 20) -> List[ThreadState]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, summary, recent_messages
+                FROM threads
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+            return [
+                ThreadState(
+                    thread_id=row[0],
+                    summary=row[1] or "",
+                    recent_messages=json.loads(row[2] or "[]"),
+                )
+                for row in rows
+            ]
 
     def create_reminder(self, reminder: ReminderState) -> None:
         with self._connect() as conn:

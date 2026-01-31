@@ -17,6 +17,24 @@ class ListStore(Protocol):
     def add_item(self, list_name: str, item: str) -> None:
         """Add an item to an existing list. Raises if list does not exist."""
 
+    def remove_item(self, list_name: str, item: str) -> bool:
+        """Remove an item from a list. Returns True if removed."""
+
+    def update_item(self, list_name: str, old_item: str, new_item: str) -> bool:
+        """Update an item in a list. Returns True if updated."""
+
+    def list_lists(self) -> List[str]:
+        """Return all list names."""
+
+    def delete_list(self, list_name: str) -> bool:
+        """Delete a list and its items. Returns True if deleted."""
+
+    def clear_list(self, list_name: str) -> bool:
+        """Remove all items from a list. Returns True if list exists."""
+
+    def clear_all_lists(self) -> int:
+        """Remove all lists and items. Returns number of lists deleted."""
+
     def get_list(self, list_name: str) -> Optional[List[ListItem]]:
         """Return items for a list, or None if list does not exist."""
 
@@ -40,6 +58,9 @@ class ThreadStore(Protocol):
         self, thread_id: str, summary: str, recent_messages: List[Dict[str, Any]]
     ) -> None:
         """Persist thread state."""
+
+    def list_threads(self, limit: int = 20) -> List[ThreadState]:
+        """List recent threads."""
 
 
 @dataclass(frozen=True)

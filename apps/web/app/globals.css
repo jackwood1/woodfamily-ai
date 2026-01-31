@@ -29,43 +29,74 @@ body {
   border: 1px solid #30363d;
 }
 
-.reminder-form {
+.chat-form {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
-.row {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+.threads-panel {
+  margin-bottom: 16px;
+  border: 1px solid #30363d;
+  border-radius: 10px;
+  padding: 8px 12px;
+  background: #0d1117;
 }
 
-.reminders-list {
+.threads-summary {
+  cursor: pointer;
+  font-weight: 600;
+  list-style: none;
+}
+
+.threads-summary::-webkit-details-marker {
+  display: none;
+}
+
+.threads-summary::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 8px;
+}
+
+details[open] .threads-summary::before {
+  content: "▾";
+}
+
+.threads-body {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  margin-top: 16px;
+  margin-top: 12px;
 }
 
-.reminder-row {
+.threads-header {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.threads-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.thread-row {
   display: flex;
   justify-content: space-between;
-  gap: 16px;
-  padding: 12px;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
   border: 1px solid #30363d;
   border-radius: 10px;
 }
 
-.meta {
+.thread-summary {
   color: #8b949e;
   font-size: 0.9rem;
-}
-
-.actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
 }
 
 .button.secondary {
@@ -76,17 +107,34 @@ body {
   background: #484f58;
 }
 
-.button.danger {
-  background: #da3633;
+.transcript {
+  border: 1px solid #30363d;
+  border-radius: 10px;
+  padding: 12px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: #0d1117;
 }
 
-.button.danger:hover {
-  background: #f85149;
+.message {
+  padding: 8px;
+  border-bottom: 1px solid #30363d;
 }
 
-.status {
-  color: #8b949e;
-  font-size: 0.9rem;
+.message:last-child {
+  border-bottom: none;
+}
+
+.message-role {
+  font-weight: 600;
+  color: #58a6ff;
+  margin-bottom: 4px;
+}
+
+.message-content {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: inherit;
 }
 
 .label {
@@ -111,6 +159,24 @@ body {
   border-radius: 8px;
   padding: 10px 16px;
   cursor: pointer;
+}
+
+.status {
+  color: #8b949e;
+  font-size: 0.9rem;
+}
+
+.integrations {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .button:hover {

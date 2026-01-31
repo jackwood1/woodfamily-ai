@@ -13,7 +13,11 @@ except Exception:  # pragma: no cover - optional dependency resolution
 
 from apps.api.routes.chat import router as chat_router
 from apps.api.routes.calendar import router as calendar_router
+from apps.api.routes.gmail import router as gmail_router
+from apps.api.routes.google_calendar import router as google_calendar_router
+from apps.api.routes.google_oauth import router as google_oauth_router
 from apps.api.routes.reminders import router as reminders_router
+from apps.api.routes.threads import router as threads_router
 from apps.api.reminders_scheduler import start_scheduler
 from packages.core.storage.sqlite import SQLiteListStore
 from apps.api.observability import init_observability
@@ -40,7 +44,11 @@ else:
     )
 app.include_router(chat_router)
 app.include_router(calendar_router)
+app.include_router(gmail_router)
+app.include_router(google_calendar_router)
+app.include_router(google_oauth_router)
 app.include_router(reminders_router)
+app.include_router(threads_router)
 
 _SCHEDULER = None
 

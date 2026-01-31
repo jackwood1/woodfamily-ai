@@ -11,7 +11,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
 
-SCOPES_READONLY = ["https://www.googleapis.com/auth/calendar.readonly"]
+SCOPES_DEFAULT = ["https://www.googleapis.com/auth/calendar.events"]
 
 
 @dataclass(frozen=True)
@@ -46,7 +46,7 @@ class GoogleCalendarClient(CalendarClient):
     def _get_credentials(self) -> Credentials:
         creds: Optional[Credentials] = None
         if os.path.exists(self._token_path):
-            creds = Credentials.from_authorized_user_file(self._token_path, SCOPES_READONLY)
+            creds = Credentials.from_authorized_user_file(self._token_path, _scopes())
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         if not creds or not creds.valid:
@@ -56,7 +56,7 @@ class GoogleCalendarClient(CalendarClient):
                     "Set CALENDAR_CREDENTIALS_PATH to your credentials.json."
                 )
             flow = InstalledAppFlow.from_client_secrets_file(
-                self._credentials_path, SCOPES_READONLY
+                self._credentials_path, _scopes()
             )
             creds = flow.run_local_server(port=0)
         if creds:
@@ -114,6 +114,43 @@ class GoogleCalendarClient(CalendarClient):
             location=item.get("location"),
             description=item.get("description"),
         )
+
+    def create_event(
+        self,
+        summary: str,
+        start_iso: str,
+        end_iso: str,
+        description: Optional[str] = None,
+    ) -> CalendarEvent:
+        service = self._service()
+        payload = {
+            "summary": summary,
+            "start": {"dateTime": start_iso},
+            "end": {"dateTime": end_iso},
+        }
+        if description:
+            payload["description"] = description
+        item = (
+            service.events()
+            .insert(calendarId=self._calendar_id, body=payload)
+            .execute()
+        )
+        start = item.get("start", {}).get("dateTime") or item.get("start", {}).get("date")
+        end = item.get("end", {}).get("dateTime") or item.get("end", {}).get("date")
+        return CalendarEvent(
+            id=item.get("id", ""),
+            title=item.get("summary", ""),
+            start=start,
+            end=end,
+            location=item.get("location"),
+            description=item.get("description"),
+        )
+
+def _scopes() -> List[str]:
+    raw = os.getenv("CALENDAR_SCOPES", "")
+    if raw:
+        return raw.split()
+    return SCOPES_DEFAULT
 
 
 def default_google_client() -> GoogleCalendarClient:
