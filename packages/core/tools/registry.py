@@ -16,8 +16,11 @@ from .list_tools import (
 )
 from .google_tools import (
     calendar_create_event,
+    calendar_delete_event,
+    calendar_find_events,
     calendar_list_logged,
     calendar_list_upcoming,
+    calendar_update_event,
     gmail_get_message,
     gmail_list_unread,
 )
@@ -185,6 +188,37 @@ def build_list_tool_registry(store: ListStore) -> ToolRegistry:
 
     registry.register(
         ToolDefinition(
+            name="calendar_find_events",
+            description="Find calendar events by query or date range.",
+            schema={
+                "type": "function",
+                "function": {
+                    "name": "calendar_find_events",
+                    "description": "Find calendar events by query or date range.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string"},
+                            "from_iso": {"type": "string"},
+                            "to_iso": {"type": "string"},
+                            "limit": {"type": "integer"},
+                        },
+                        "required": [],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            handler=lambda args: calendar_find_events(
+                query=args.get("query"),
+                from_iso=args.get("from_iso"),
+                to_iso=args.get("to_iso"),
+                limit=args.get("limit", 10),
+            ),
+        )
+    )
+
+    registry.register(
+        ToolDefinition(
             name="calendar_create_event",
             description="Create a calendar event.",
             schema={
@@ -199,6 +233,12 @@ def build_list_tool_registry(store: ListStore) -> ToolRegistry:
                             "start_iso": {"type": "string"},
                             "end_iso": {"type": "string"},
                             "description": {"type": "string"},
+                            "recurrence": {
+                                "oneOf": [
+                                    {"type": "string"},
+                                    {"type": "array", "items": {"type": "string"}},
+                                ]
+                            },
                         },
                         "required": ["summary", "start_iso", "end_iso"],
                         "additionalProperties": False,
@@ -210,7 +250,71 @@ def build_list_tool_registry(store: ListStore) -> ToolRegistry:
                 start_iso=args["start_iso"],
                 end_iso=args["end_iso"],
                 description=args.get("description"),
+                recurrence=args.get("recurrence"),
             ),
+        )
+    )
+
+    registry.register(
+        ToolDefinition(
+            name="calendar_update_event",
+            description="Update a calendar event by id.",
+            schema={
+                "type": "function",
+                "function": {
+                    "name": "calendar_update_event",
+                    "description": "Update a calendar event by id.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "event_id": {"type": "string"},
+                            "summary": {"type": "string"},
+                            "start_iso": {"type": "string"},
+                            "end_iso": {"type": "string"},
+                            "description": {"type": "string"},
+                            "recurrence": {
+                                "oneOf": [
+                                    {"type": "string"},
+                                    {"type": "array", "items": {"type": "string"}},
+                                ]
+                            },
+                        },
+                        "required": ["event_id"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            handler=lambda args: calendar_update_event(
+                event_id=args["event_id"],
+                summary=args.get("summary"),
+                start_iso=args.get("start_iso"),
+                end_iso=args.get("end_iso"),
+                description=args.get("description"),
+                recurrence=args.get("recurrence"),
+            ),
+        )
+    )
+
+    registry.register(
+        ToolDefinition(
+            name="calendar_delete_event",
+            description="Delete a calendar event by id.",
+            schema={
+                "type": "function",
+                "function": {
+                    "name": "calendar_delete_event",
+                    "description": "Delete a calendar event by id.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "event_id": {"type": "string"},
+                        },
+                        "required": ["event_id"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            handler=lambda args: calendar_delete_event(event_id=args["event_id"]),
         )
     )
 

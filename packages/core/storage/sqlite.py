@@ -85,6 +85,7 @@ class SQLiteListStore(ListStore):
                     end_iso TEXT NOT NULL,
                     description TEXT,
                     html_link TEXT,
+                    recurrence TEXT,
                     source TEXT NOT NULL,
                     raw_payload TEXT,
                     created_at TEXT NOT NULL,
@@ -92,6 +93,7 @@ class SQLiteListStore(ListStore):
                 )
                 """
             )
+            self._ensure_column(conn, "calendar_events", "recurrence", "TEXT", "NULL")
 
     def _ensure_column(
         self, conn: sqlite3.Connection, table: str, column: str, column_def: str, default_sql: str
@@ -467,20 +469,22 @@ class SQLiteListStore(ListStore):
         self, event: CalendarEventState, raw_payload: Optional[dict] = None
     ) -> None:
         raw_json = json.dumps(raw_payload) if raw_payload else None
+        recurrence_json = json.dumps(event.recurrence) if event.recurrence else None
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO calendar_events (
                     event_id, summary, start_iso, end_iso, description, html_link,
-                    source, raw_payload, created_at, updated_at
+                    recurrence, source, raw_payload, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(event_id) DO UPDATE SET
                     summary = excluded.summary,
                     start_iso = excluded.start_iso,
                     end_iso = excluded.end_iso,
                     description = excluded.description,
                     html_link = excluded.html_link,
+                    recurrence = excluded.recurrence,
                     source = excluded.source,
                     raw_payload = excluded.raw_payload,
                     updated_at = excluded.updated_at
@@ -492,6 +496,7 @@ class SQLiteListStore(ListStore):
                     event.end_iso,
                     event.description,
                     event.html_link,
+                    recurrence_json,
                     event.source,
                     raw_json,
                     event.created_at,
@@ -504,7 +509,7 @@ class SQLiteListStore(ListStore):
             row = conn.execute(
                 """
                 SELECT event_id, summary, start_iso, end_iso, description, html_link,
-                       source, created_at, updated_at
+                       recurrence, source, created_at, updated_at
                 FROM calendar_events
                 WHERE event_id = ?
                 """,
@@ -519,9 +524,10 @@ class SQLiteListStore(ListStore):
                 end_iso=row[3],
                 description=row[4],
                 html_link=row[5],
-                source=row[6],
-                created_at=row[7],
-                updated_at=row[8],
+                recurrence=json.loads(row[6]) if row[6] else None,
+                source=row[7],
+                created_at=row[8],
+                updated_at=row[9],
             )
 
     def list_calendar_events(self, limit: int = 20) -> List[CalendarEventState]:
@@ -529,7 +535,7 @@ class SQLiteListStore(ListStore):
             rows = conn.execute(
                 """
                 SELECT event_id, summary, start_iso, end_iso, description, html_link,
-                       source, created_at, updated_at
+                       recurrence, source, created_at, updated_at
                 FROM calendar_events
                 ORDER BY updated_at DESC
                 LIMIT ?
@@ -544,9 +550,10 @@ class SQLiteListStore(ListStore):
                     end_iso=row[3],
                     description=row[4],
                     html_link=row[5],
-                    source=row[6],
-                    created_at=row[7],
-                    updated_at=row[8],
+                    recurrence=json.loads(row[6]) if row[6] else None,
+                    source=row[7],
+                    created_at=row[8],
+                    updated_at=row[9],
                 )
                 for row in rows
             ]

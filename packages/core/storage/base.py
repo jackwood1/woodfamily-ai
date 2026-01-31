@@ -109,6 +109,7 @@ class CalendarEventState:
     end_iso: str
     description: Optional[str]
     html_link: Optional[str]
+    recurrence: Optional[List[str]]
     source: str
     created_at: str
     updated_at: str

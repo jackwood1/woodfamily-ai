@@ -21,7 +21,10 @@ def test_registry_lists_and_schemas(tmp_path):
         "gmail_get_message",
         "calendar_list_upcoming",
         "calendar_list_logged",
+        "calendar_find_events",
         "calendar_create_event",
+        "calendar_update_event",
+        "calendar_delete_event",
     }
     assert registry.has_tool("create_list") is True
     assert registry.has_tool("unknown") is False
@@ -42,7 +45,10 @@ def test_registry_lists_and_schemas(tmp_path):
         "gmail_get_message",
         "calendar_list_upcoming",
         "calendar_list_logged",
+        "calendar_find_events",
         "calendar_create_event",
+        "calendar_update_event",
+        "calendar_delete_event",
     }
 
 
