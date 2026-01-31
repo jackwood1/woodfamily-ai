@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
 
+from apps.api.schemas.calendar import CalendarCreateRequest
 from packages.core.google.calendar import create_event, list_upcoming
 from packages.core.google.gmail import GoogleNotConnected
 
@@ -20,13 +21,13 @@ def upcoming(limit: int = 10, from_iso: Optional[str] = None) -> List[Dict[str, 
 
 
 @router.post("/events")
-def create(payload: Dict[str, Any]) -> Dict[str, Any]:
+def create(payload: CalendarCreateRequest) -> Dict[str, Any]:
     try:
         return create_event(
-            summary=payload.get("summary", ""),
-            start_iso=payload.get("start_iso", ""),
-            end_iso=payload.get("end_iso", ""),
-            description=payload.get("description"),
+            summary=payload.summary,
+            start_iso=payload.start,
+            end_iso=payload.end,
+            description=payload.description,
         )
     except GoogleNotConnected:
         raise HTTPException(status_code=400, detail="google_not_connected")

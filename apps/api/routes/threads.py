@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from typing import List
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from apps.api.schemas.threads import ThreadDetailResponse, ThreadSummaryResponse
 from packages.core.storage.sqlite import SQLiteListStore
@@ -31,7 +31,7 @@ def list_threads(limit: int = 20) -> List[ThreadSummaryResponse]:
 def get_thread(thread_id: str) -> ThreadDetailResponse:
     thread = _store().get_thread(thread_id)
     if thread is None:
-        return ThreadDetailResponse(thread_id=thread_id, summary="", recent_messages=[])
+        raise HTTPException(status_code=404, detail="thread_not_found")
     return ThreadDetailResponse(
         thread_id=thread.thread_id,
         summary=thread.summary,

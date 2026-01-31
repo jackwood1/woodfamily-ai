@@ -19,6 +19,7 @@ DEFAULT_SCOPES = [
     "email",
     "profile",
 ]
+STATE_TTL_SECONDS = int(os.getenv("GOOGLE_STATE_TTL_SECONDS", "600"))
 
 
 @dataclass
@@ -75,6 +76,12 @@ def _load_json(path: str) -> Optional[Dict[str, Any]]:
         return json.load(handle)
 
 
+def _delete_state() -> None:
+    path = _state_path()
+    if os.path.exists(path):
+        os.remove(path)
+
+
 def generate_state() -> str:
     state = uuid.uuid4().hex
     _save_json(_state_path(), {"state": state, "created_at": int(time.time())})
@@ -85,7 +92,17 @@ def validate_state(state: str) -> bool:
     stored = _load_json(_state_path())
     if not stored:
         return False
-    return stored.get("state") == state
+    created_at = stored.get("created_at")
+    if not isinstance(created_at, int):
+        _delete_state()
+        return False
+    if int(time.time()) - created_at > STATE_TTL_SECONDS:
+        _delete_state()
+        return False
+    if stored.get("state") != state:
+        return False
+    _delete_state()
+    return True
 
 
 def build_auth_url(state: str) -> str:
