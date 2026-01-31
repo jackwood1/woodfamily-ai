@@ -6,6 +6,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlencode
 
 import httpx
 
@@ -116,9 +117,7 @@ def build_auth_url(state: str) -> str:
         "include_granted_scopes": "true",
         "state": state,
     }
-    return httpx.URL("https://accounts.google.com/o/oauth2/v2/auth").copy_add_params(
-        params
-    ).to_str()
+    return f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}"
 
 
 def exchange_code(code: str) -> Dict[str, Any]:

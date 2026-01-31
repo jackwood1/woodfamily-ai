@@ -6,7 +6,7 @@ import sqlite3
 import uuid
 from typing import List, Optional
 
-from .base import ListItem, ListStore, ReminderState, ThreadState
+from .base import CalendarEventState, ListItem, ListStore, ReminderState, ThreadState
 
 
 class SQLiteListStore(ListStore):
@@ -71,6 +71,22 @@ class SQLiteListStore(ListStore):
                     active INTEGER NOT NULL,
                     last_sent_at TEXT,
                     next_run_at TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS calendar_events (
+                    event_id TEXT PRIMARY KEY,
+                    summary TEXT NOT NULL,
+                    start_iso TEXT NOT NULL,
+                    end_iso TEXT NOT NULL,
+                    description TEXT,
+                    html_link TEXT,
+                    source TEXT NOT NULL,
+                    raw_payload TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )
@@ -446,3 +462,95 @@ class SQLiteListStore(ListStore):
                 )
                 for row in rows
             ]
+
+    def upsert_calendar_event(
+        self, event: CalendarEventState, raw_payload: Optional[dict] = None
+    ) -> None:
+        raw_json = json.dumps(raw_payload) if raw_payload else None
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO calendar_events (
+                    event_id, summary, start_iso, end_iso, description, html_link,
+                    source, raw_payload, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(event_id) DO UPDATE SET
+                    summary = excluded.summary,
+                    start_iso = excluded.start_iso,
+                    end_iso = excluded.end_iso,
+                    description = excluded.description,
+                    html_link = excluded.html_link,
+                    source = excluded.source,
+                    raw_payload = excluded.raw_payload,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    event.event_id,
+                    event.summary,
+                    event.start_iso,
+                    event.end_iso,
+                    event.description,
+                    event.html_link,
+                    event.source,
+                    raw_json,
+                    event.created_at,
+                    event.updated_at,
+                ),
+            )
+
+    def get_calendar_event(self, event_id: str) -> Optional[CalendarEventState]:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT event_id, summary, start_iso, end_iso, description, html_link,
+                       source, created_at, updated_at
+                FROM calendar_events
+                WHERE event_id = ?
+                """,
+                (event_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            return CalendarEventState(
+                event_id=row[0],
+                summary=row[1],
+                start_iso=row[2],
+                end_iso=row[3],
+                description=row[4],
+                html_link=row[5],
+                source=row[6],
+                created_at=row[7],
+                updated_at=row[8],
+            )
+
+    def list_calendar_events(self, limit: int = 20) -> List[CalendarEventState]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT event_id, summary, start_iso, end_iso, description, html_link,
+                       source, created_at, updated_at
+                FROM calendar_events
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+            return [
+                CalendarEventState(
+                    event_id=row[0],
+                    summary=row[1],
+                    start_iso=row[2],
+                    end_iso=row[3],
+                    description=row[4],
+                    html_link=row[5],
+                    source=row[6],
+                    created_at=row[7],
+                    updated_at=row[8],
+                )
+                for row in rows
+            ]
+
+    def delete_calendar_event(self, event_id: str) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM calendar_events WHERE event_id = ?", (event_id,))

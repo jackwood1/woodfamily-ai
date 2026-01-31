@@ -1,5 +1,6 @@
 from .google_tools import (
     calendar_create_event,
+    calendar_list_logged,
     calendar_list_upcoming,
     gmail_get_message,
     gmail_list_unread,
@@ -28,6 +29,7 @@ __all__ = [
     "remove_item",
     "update_item",
     "calendar_create_event",
+    "calendar_list_logged",
     "calendar_list_upcoming",
     "gmail_get_message",
     "gmail_list_unread",

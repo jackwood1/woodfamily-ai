@@ -16,6 +16,7 @@ from .list_tools import (
 )
 from .google_tools import (
     calendar_create_event,
+    calendar_list_logged,
     calendar_list_upcoming,
     gmail_get_message,
     gmail_list_unread,
@@ -156,6 +157,29 @@ def build_list_tool_registry(store: ListStore) -> ToolRegistry:
                 limit=args.get("limit", 10),
                 from_iso=args.get("from_iso"),
             ),
+        )
+    )
+
+    registry.register(
+        ToolDefinition(
+            name="calendar_list_logged",
+            description="List logged calendar events created by the assistant.",
+            schema={
+                "type": "function",
+                "function": {
+                    "name": "calendar_list_logged",
+                    "description": "List logged calendar events created by the assistant.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "limit": {"type": "integer"},
+                        },
+                        "required": [],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            handler=lambda args: calendar_list_logged(limit=args.get("limit", 20)),
         )
     )
 

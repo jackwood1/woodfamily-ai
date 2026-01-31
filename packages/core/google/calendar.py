@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -9,6 +10,7 @@ from .oauth import get_valid_access_token
 
 
 CALENDAR_BASE_URL = "https://www.googleapis.com/calendar/v3"
+DEFAULT_TZ_OFFSET = os.getenv("CALENDAR_DEFAULT_TZ_OFFSET", "-05:00")
 
 
 def _headers() -> Dict[str, str]:
@@ -42,6 +44,8 @@ def create_event(
     end_iso: str,
     description: Optional[str] = None,
 ) -> Dict[str, Any]:
+    start_iso = _ensure_timezone(start_iso)
+    end_iso = _ensure_timezone(end_iso)
     payload: Dict[str, Any] = {
         "summary": summary,
         "start": {"dateTime": start_iso},
@@ -57,3 +61,12 @@ def create_event(
     )
     response.raise_for_status()
     return response.json()
+
+
+def _ensure_timezone(value: str) -> str:
+    if "T" not in value:
+        return value
+    _, time_part = value.split("T", 1)
+    if "Z" in time_part or "+" in time_part or "-" in time_part:
+        return value
+    return f"{value}{DEFAULT_TZ_OFFSET}"

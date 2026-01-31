@@ -99,3 +99,33 @@ class ReminderStore(Protocol):
 
     def list_due_reminders(self, now_iso: str) -> List[ReminderState]:
         """List reminders due to run."""
+
+
+@dataclass(frozen=True)
+class CalendarEventState:
+    event_id: str
+    summary: str
+    start_iso: str
+    end_iso: str
+    description: Optional[str]
+    html_link: Optional[str]
+    source: str
+    created_at: str
+    updated_at: str
+
+
+@runtime_checkable
+class CalendarEventStore(Protocol):
+    def upsert_calendar_event(
+        self, event: CalendarEventState, raw_payload: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """Insert or update a calendar event."""
+
+    def get_calendar_event(self, event_id: str) -> Optional[CalendarEventState]:
+        """Return a calendar event by id."""
+
+    def list_calendar_events(self, limit: int = 20) -> List[CalendarEventState]:
+        """List recent calendar events."""
+
+    def delete_calendar_event(self, event_id: str) -> None:
+        """Delete a calendar event by id."""
