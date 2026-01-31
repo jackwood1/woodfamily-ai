@@ -5,3 +5,5 @@ __pycache__/
 apps/api/data/
 apps/web/node_modules/
 apps/web/.next/
+credentials.json
+apps/api/data/token.json

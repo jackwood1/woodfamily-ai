@@ -12,13 +12,15 @@ except Exception:  # pragma: no cover - optional dependency resolution
     FastAPIInstrumentor = None
 
 from apps.api.routes.chat import router as chat_router
+from apps.api.routes.calendar import router as calendar_router
 from apps.api.routes.reminders import router as reminders_router
 from apps.api.reminders_scheduler import start_scheduler
 from packages.core.storage.sqlite import SQLiteListStore
 from apps.api.observability import init_observability
+from packages.core.logging_config import configure_logging
 
 
-logging.basicConfig(level=logging.INFO)
+configure_logging()
 
 init_observability()
 app = FastAPI(title="Home Ops Copilot API")
@@ -37,6 +39,7 @@ else:
         "Install observability dependencies to enable tracing."
     )
 app.include_router(chat_router)
+app.include_router(calendar_router)
 app.include_router(reminders_router)
 
 _SCHEDULER = None

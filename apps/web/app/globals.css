@@ -29,6 +29,66 @@ body {
   border: 1px solid #30363d;
 }
 
+.reminder-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.reminders-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.reminder-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px;
+  border: 1px solid #30363d;
+  border-radius: 10px;
+}
+
+.meta {
+  color: #8b949e;
+  font-size: 0.9rem;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.button.secondary {
+  background: #30363d;
+}
+
+.button.secondary:hover {
+  background: #484f58;
+}
+
+.button.danger {
+  background: #da3633;
+}
+
+.button.danger:hover {
+  background: #f85149;
+}
+
+.status {
+  color: #8b949e;
+  font-size: 0.9rem;
+}
+
 .label {
   font-weight: 600;
 }
