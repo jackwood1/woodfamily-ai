@@ -1,0 +1,17 @@
+{
+  "leagues": [
+    {
+      "key": "monday_bayside",
+      "name": "Monday at Bayside",
+      "site": "Casco Bay Sports",
+      "schedule_url": "https://www.cascobaysports.com/images/schedules-standings/bowling/Bowling_Schedules_and_Standings_-_Monday_Jan_26_3.pdf",
+      "stats_url": "https://www.cascobaysports.com/images/schedules-standings/bowling/Bowling_Statistics_-_Jan_Mon_26_2.pdf",
+      "teams": [
+        {
+          "name": "Strikers",
+          "roster": ["Alex", "Taylor"]
+        }
+      ]
+    }
+  ]
+}

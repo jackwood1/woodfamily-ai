@@ -6,7 +6,15 @@ import sqlite3
 import uuid
 from typing import List, Optional
 
-from .base import CalendarEventState, ListItem, ListStore, ReminderState, ThreadState
+from .base import (
+    BowlingMatchState,
+    BowlingStatState,
+    CalendarEventState,
+    ListItem,
+    ListStore,
+    ReminderState,
+    ThreadState,
+)
 
 
 class SQLiteListStore(ListStore):
@@ -94,6 +102,42 @@ class SQLiteListStore(ListStore):
                 """
             )
             self._ensure_column(conn, "calendar_events", "recurrence", "TEXT", "NULL")
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS bowling_stats (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    league_key TEXT NOT NULL,
+                    team_name TEXT,
+                    player_name TEXT,
+                    average INTEGER,
+                    handicap INTEGER,
+                    wins INTEGER,
+                    losses INTEGER,
+                    high_game INTEGER,
+                    high_series INTEGER,
+                    points REAL,
+                    raw_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS bowling_matches (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    league_key TEXT NOT NULL,
+                    match_date TEXT,
+                    match_time TEXT,
+                    lane TEXT,
+                    team_a TEXT,
+                    team_b TEXT,
+                    raw_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
 
     def _ensure_column(
         self, conn: sqlite3.Connection, table: str, column: str, column_def: str, default_sql: str
@@ -561,3 +605,133 @@ class SQLiteListStore(ListStore):
     def delete_calendar_event(self, event_id: str) -> None:
         with self._connect() as conn:
             conn.execute("DELETE FROM calendar_events WHERE event_id = ?", (event_id,))
+
+    def save_bowling_stats(self, league_key: str, stats: List[BowlingStatState]) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM bowling_stats WHERE league_key = ?", (league_key,))
+            for stat in stats:
+                conn.execute(
+                    """
+                    INSERT INTO bowling_stats (
+                        league_key, team_name, player_name, average, handicap, wins,
+                        losses, high_game, high_series, points, raw_json, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        stat.league_key,
+                        stat.team_name,
+                        stat.player_name,
+                        stat.average,
+                        stat.handicap,
+                        stat.wins,
+                        stat.losses,
+                        stat.high_game,
+                        stat.high_series,
+                        stat.points,
+                        json.dumps(stat.raw),
+                        stat.created_at,
+                        stat.updated_at,
+                    ),
+                )
+
+    def list_bowling_stats(
+        self, league_key: str, team_name: Optional[str] = None, player_name: Optional[str] = None
+    ) -> List[BowlingStatState]:
+        query = (
+            "SELECT league_key, team_name, player_name, average, handicap, wins, "
+            "losses, high_game, high_series, points, raw_json, created_at, updated_at "
+            "FROM bowling_stats WHERE league_key = ?"
+        )
+        params: List[object] = [league_key]
+        if team_name:
+            query += " AND team_name = ?"
+            params.append(team_name)
+        if player_name:
+            query += " AND player_name = ?"
+            params.append(player_name)
+        query += " ORDER BY team_name ASC, player_name ASC"
+        with self._connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+            return [
+                BowlingStatState(
+                    league_key=row[0],
+                    team_name=row[1],
+                    player_name=row[2],
+                    average=row[3],
+                    handicap=row[4],
+                    wins=row[5],
+                    losses=row[6],
+                    high_game=row[7],
+                    high_series=row[8],
+                    points=row[9],
+                    raw=json.loads(row[10] or "{}"),
+                    created_at=row[11],
+                    updated_at=row[12],
+                )
+                for row in rows
+            ]
+
+    def save_bowling_matches(self, league_key: str, matches: List[BowlingMatchState]) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM bowling_matches WHERE league_key = ?", (league_key,))
+            for match in matches:
+                conn.execute(
+                    """
+                    INSERT INTO bowling_matches (
+                        league_key, match_date, match_time, lane, team_a, team_b,
+                        raw_json, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        match.league_key,
+                        match.match_date,
+                        match.match_time,
+                        match.lane,
+                        match.team_a,
+                        match.team_b,
+                        json.dumps(match.raw),
+                        match.created_at,
+                        match.updated_at,
+                    ),
+                )
+
+    def list_bowling_matches(
+        self,
+        league_key: str,
+        team_name: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+    ) -> List[BowlingMatchState]:
+        query = (
+            "SELECT league_key, match_date, match_time, lane, team_a, team_b, "
+            "raw_json, created_at, updated_at FROM bowling_matches WHERE league_key = ?"
+        )
+        params: List[object] = [league_key]
+        if team_name:
+            query += " AND (team_a = ? OR team_b = ?)"
+            params.extend([team_name, team_name])
+        if date_from:
+            query += " AND match_date >= ?"
+            params.append(date_from)
+        if date_to:
+            query += " AND match_date <= ?"
+            params.append(date_to)
+        query += " ORDER BY match_date DESC, match_time DESC"
+        with self._connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+            return [
+                BowlingMatchState(
+                    league_key=row[0],
+                    match_date=row[1],
+                    match_time=row[2],
+                    lane=row[3],
+                    team_a=row[4],
+                    team_b=row[5],
+                    raw=json.loads(row[6] or "{}"),
+                    created_at=row[7],
+                    updated_at=row[8],
+                )
+                for row in rows
+            ]

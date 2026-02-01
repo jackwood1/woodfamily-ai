@@ -130,3 +130,56 @@ class CalendarEventStore(Protocol):
 
     def delete_calendar_event(self, event_id: str) -> None:
         """Delete a calendar event by id."""
+
+
+@dataclass(frozen=True)
+class BowlingStatState:
+    league_key: str
+    team_name: Optional[str]
+    player_name: Optional[str]
+    average: Optional[int]
+    handicap: Optional[int]
+    wins: Optional[int]
+    losses: Optional[int]
+    high_game: Optional[int]
+    high_series: Optional[int]
+    points: Optional[float]
+    raw: Dict[str, Any]
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class BowlingMatchState:
+    league_key: str
+    match_date: Optional[str]
+    match_time: Optional[str]
+    lane: Optional[str]
+    team_a: Optional[str]
+    team_b: Optional[str]
+    raw: Dict[str, Any]
+    created_at: str
+    updated_at: str
+
+
+@runtime_checkable
+class BowlingStore(Protocol):
+    def save_bowling_stats(self, league_key: str, stats: List[BowlingStatState]) -> None:
+        """Replace bowling stats for a league."""
+
+    def list_bowling_stats(
+        self, league_key: str, team_name: Optional[str] = None, player_name: Optional[str] = None
+    ) -> List[BowlingStatState]:
+        """List bowling stats for a league."""
+
+    def save_bowling_matches(self, league_key: str, matches: List[BowlingMatchState]) -> None:
+        """Replace bowling matches for a league."""
+
+    def list_bowling_matches(
+        self,
+        league_key: str,
+        team_name: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+    ) -> List[BowlingMatchState]:
+        """List bowling matches for a league."""
