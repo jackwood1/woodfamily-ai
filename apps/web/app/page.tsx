@@ -18,6 +18,7 @@ type GoogleStatus = {
   scopes?: string[];
   expiry?: number;
 };
+type BowlingLeague = { key: string; name: string; site?: string };
 
 async function sendChat(message: string, threadId: string) {
   const response = await fetch(`${API_BASE_URL}/chat`, {
@@ -52,6 +53,15 @@ async function getThread(threadId: string): Promise<ThreadDetail> {
   return response.json();
 }
 
+async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
+  const response = await fetch(url, options);
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || "Request failed");
+  }
+  return response.json();
+}
+
 export default function HomePage() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatStatus, setChatStatus] = useState("");
@@ -59,12 +69,33 @@ export default function HomePage() {
   const [threads, setThreads] = useState<ThreadSummary[]>([]);
   const [threadsStatus, setThreadsStatus] = useState("");
   const [googleStatus, setGoogleStatus] = useState<GoogleStatus | null>(null);
+  const [bowlingLeagues, setBowlingLeagues] = useState<BowlingLeague[]>([]);
+  const [bowlingLeagueKey, setBowlingLeagueKey] = useState("");
+  const [bowlingTeamName, setBowlingTeamName] = useState("");
+  const [bowlingPlayerName, setBowlingPlayerName] = useState("");
+  const [bowlingDateFrom, setBowlingDateFrom] = useState("");
+  const [bowlingDateTo, setBowlingDateTo] = useState("");
+  const [bowlingStatus, setBowlingStatus] = useState("");
+  const [bowlingOutput, setBowlingOutput] = useState<string>("");
 
   useEffect(() => {
     fetch(`${API_BASE_URL}/api/integrations/google/status`)
       .then((response) => response.json())
       .then((data) => setGoogleStatus(data))
       .catch(() => setGoogleStatus({ connected: false }));
+  }, []);
+
+  useEffect(() => {
+    fetchJson<BowlingLeague[]>(`${API_BASE_URL}/api/bowling/leagues`)
+      .then((data) => {
+        setBowlingLeagues(data);
+        if (data.length > 0) {
+          setBowlingLeagueKey(data[0].key);
+        }
+      })
+      .catch((error) => {
+        setBowlingStatus(error instanceof Error ? error.message : "Failed to load leagues");
+      });
   }, []);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -155,6 +186,179 @@ export default function HomePage() {
             )}
           </div>
         </div>
+      </section>
+
+      <section className="card">
+        <h2>Bowling</h2>
+        <div className="row">
+          <label className="label" htmlFor="bowlingLeague">
+            League
+          </label>
+          <select
+            id="bowlingLeague"
+            className="input"
+            value={bowlingLeagueKey}
+            onChange={(event) => setBowlingLeagueKey(event.target.value)}
+          >
+            {bowlingLeagues.map((league) => (
+              <option key={league.key} value={league.key}>
+                {league.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="row">
+          <button
+            type="button"
+            className="button secondary"
+            onClick={async () => {
+              setBowlingStatus("Syncing...");
+              try {
+                const data = await fetchJson(
+                  `${API_BASE_URL}/api/bowling/${bowlingLeagueKey}/sync`,
+                  { method: "POST" }
+                );
+                setBowlingOutput(JSON.stringify(data, null, 2));
+                setBowlingStatus("Synced");
+              } catch (error) {
+                setBowlingStatus(error instanceof Error ? error.message : "Sync failed");
+              }
+            }}
+          >
+            Sync League
+          </button>
+          <button
+            type="button"
+            className="button secondary"
+            onClick={async () => {
+              setBowlingStatus("Loading teams...");
+              try {
+                const data = await fetchJson(
+                  `${API_BASE_URL}/api/bowling/${bowlingLeagueKey}/teams`
+                );
+                setBowlingOutput(JSON.stringify(data, null, 2));
+                setBowlingStatus("Loaded");
+              } catch (error) {
+                setBowlingStatus(error instanceof Error ? error.message : "Failed to load teams");
+              }
+            }}
+          >
+            List Teams
+          </button>
+        </div>
+        <div className="row">
+          <input
+            className="input"
+            placeholder="Team name"
+            value={bowlingTeamName}
+            onChange={(event) => setBowlingTeamName(event.target.value)}
+          />
+          <button
+            type="button"
+            className="button secondary"
+            onClick={async () => {
+              if (!bowlingTeamName) {
+                setBowlingStatus("Enter a team name");
+                return;
+              }
+              setBowlingStatus("Loading team stats...");
+              try {
+                const data = await fetchJson(
+                  `${API_BASE_URL}/api/bowling/${bowlingLeagueKey}/team-stats?team_name=${encodeURIComponent(
+                    bowlingTeamName
+                  )}`
+                );
+                setBowlingOutput(JSON.stringify(data, null, 2));
+                setBowlingStatus("Loaded");
+              } catch (error) {
+                setBowlingStatus(error instanceof Error ? error.message : "Failed to load stats");
+              }
+            }}
+          >
+            Team Stats
+          </button>
+        </div>
+        <div className="row">
+          <input
+            className="input"
+            placeholder="Player name"
+            value={bowlingPlayerName}
+            onChange={(event) => setBowlingPlayerName(event.target.value)}
+          />
+          <button
+            type="button"
+            className="button secondary"
+            onClick={async () => {
+              if (!bowlingPlayerName) {
+                setBowlingStatus("Enter a player name");
+                return;
+              }
+              setBowlingStatus("Loading player stats...");
+              try {
+                const data = await fetchJson(
+                  `${API_BASE_URL}/api/bowling/${bowlingLeagueKey}/player-stats?player_name=${encodeURIComponent(
+                    bowlingPlayerName
+                  )}`
+                );
+                setBowlingOutput(JSON.stringify(data, null, 2));
+                setBowlingStatus("Loaded");
+              } catch (error) {
+                setBowlingStatus(error instanceof Error ? error.message : "Failed to load stats");
+              }
+            }}
+          >
+            Player Stats
+          </button>
+        </div>
+        <div className="row">
+          <input
+            className="input"
+            placeholder="Date from (YYYY-MM-DD)"
+            value={bowlingDateFrom}
+            onChange={(event) => setBowlingDateFrom(event.target.value)}
+          />
+          <input
+            className="input"
+            placeholder="Date to (YYYY-MM-DD)"
+            value={bowlingDateTo}
+            onChange={(event) => setBowlingDateTo(event.target.value)}
+          />
+          <button
+            type="button"
+            className="button secondary"
+            onClick={async () => {
+              setBowlingStatus("Loading matches...");
+              const params = new URLSearchParams();
+              if (bowlingTeamName) {
+                params.set("team_name", bowlingTeamName);
+              }
+              if (bowlingDateFrom) {
+                params.set("date_from", bowlingDateFrom);
+              }
+              if (bowlingDateTo) {
+                params.set("date_to", bowlingDateTo);
+              }
+              const query = params.toString();
+              try {
+                const data = await fetchJson(
+                  `${API_BASE_URL}/api/bowling/${bowlingLeagueKey}/matches${query ? `?${query}` : ""}`
+                );
+                setBowlingOutput(JSON.stringify(data, null, 2));
+                setBowlingStatus("Loaded");
+              } catch (error) {
+                setBowlingStatus(error instanceof Error ? error.message : "Failed to load matches");
+              }
+            }}
+          >
+            Matches
+          </button>
+        </div>
+        <div className="status">{bowlingStatus}</div>
+        {bowlingOutput ? (
+          <pre className="message-content">{bowlingOutput}</pre>
+        ) : (
+          <p className="meta">No bowling data loaded yet.</p>
+        )}
       </section>
 
       <section className="card">

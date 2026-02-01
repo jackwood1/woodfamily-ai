@@ -11,6 +11,7 @@ try:
 except Exception:  # pragma: no cover - optional dependency resolution
     FastAPIInstrumentor = None
 
+from apps.api.routes.bowling import router as bowling_router
 from apps.api.routes.chat import router as chat_router
 from apps.api.routes.calendar import router as calendar_router
 from apps.api.routes.gmail import router as gmail_router
@@ -44,6 +45,7 @@ else:
     )
 app.include_router(chat_router)
 app.include_router(calendar_router)
+app.include_router(bowling_router)
 app.include_router(gmail_router)
 app.include_router(google_calendar_router)
 app.include_router(google_oauth_router)
