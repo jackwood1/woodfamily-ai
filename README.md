@@ -43,6 +43,29 @@ Set `MCP_TRANSPORT` to `stdio` (default) or `streamable-http` when you want to
 serve it locally over HTTP. Use the same `CALENDAR_CREDENTIALS_PATH` and
 `CALENDAR_TOKEN_PATH` environment variables as the API.
 
+## Bowling MCP Agent (local)
+This agent syncs bowling stats/schedules and exposes league tools.
+
+Config:
+- Create `apps/api/data/bowling.json` (see `packages/core/bowling/sample_config.json`)
+- Set `BOWLING_CONFIG_PATH` if you store the file elsewhere
+
+Run:
+```bash
+python3.11 -m venv .venv-mcp
+source .venv-mcp/bin/activate
+pip install mcp
+python apps/bowling_agent/server.py
+```
+
+Tools:
+- `list_leagues()`
+- `sync_league(league_key)`
+- `list_teams(league_key)`
+- `team_stats(league_key, team_name)`
+- `player_stats(league_key, player_name)`
+- `list_matches(league_key, team_name?, date_from?, date_to?)`
+
 ## Logging
 Standard format: `timestamp level app message`
 
