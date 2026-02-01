@@ -129,6 +129,46 @@ def test_casco_monday_uses_cache(monkeypatch, tmp_path):
     assert result["standings"][0]["team"] == "Beer Frame"
 
 
+def test_casco_monday_team_summary_parses_schedule(monkeypatch, tmp_path):
+    monkeypatch.setenv("CASCO_MONDAY_URL", "https://example.com/casco.pdf")
+    monkeypatch.setenv("HOME_OPS_DB_PATH", str(tmp_path / "lists.db"))
+    monkeypatch.setattr(casco_monday, "fetch_pdf", lambda _: b"%PDF-1.4")
+    tables = [
+        [
+            ["TM #", "Name", "Captain", "Points"],
+            ["6", "Beer Frame", "Rob Moore", "25"],
+            ["2", "Don't Stop Bowl-ieving", "Victor Wakelin", "25"],
+        ],
+        [
+            ["Week Number:", "", "", "1", "2", "3", "4", "5", "6", "7", "Playoffs", "Playoffs"],
+            ["Date:", "", "", "1/12 1/19 1/26 2/2", "", "", "", "2/9 2/16 2/23 3/2 3/9", "", "", "", ""],
+            ["", "6", "Beer Frame", "8:00 11", "5:30 17", "", "5:30 15", "5:30 14", "8:00 11", "8:00 19", "", "", ""],
+            ["", "", "", "12", "13", "", "14", "15", "11", "19", "", "", ""],
+        ],
+    ]
+    monkeypatch.setattr(
+        casco_monday,
+        "pdfplumber",
+        SimpleNamespace(open=lambda _: _FakePDF("Schedule", tables)),
+        raising=False,
+    )
+    result = casco_monday.get_casco_monday_team_summary(team_name="Beer Frame", llm=_FakeLLM())
+    assert result["status"] == "ok"
+    schedule = result["team_summary"]["schedule"]
+    assert schedule[3]["date"] == "2/2"
+    assert schedule[3]["time"] == "5:30"
+    assert schedule[3]["lane"] == "15"
+    assert schedule[4]["date"] == "2/9"
+    assert schedule[4]["time"] == "5:30"
+    assert schedule[4]["lane"] == "14"
+    assert schedule[5]["date"] == "2/16"
+    assert schedule[5]["time"] == "8:00"
+    assert schedule[5]["lane"] == "11"
+    assert schedule[6]["date"] == "2/23"
+    assert schedule[6]["time"] == "8:00"
+    assert schedule[6]["lane"] == "19"
+
+
 class _FakeStore:
     def __init__(self, fetch_state: Optional[BowlingFetchState] = None) -> None:
         self._fetch_state = fetch_state

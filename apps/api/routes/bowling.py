@@ -8,7 +8,7 @@ from packages.core.bowling.service import BowlingService
 from packages.core.bowling.bopo_schedule import get_bopo_schedule
 from packages.core.bowling.bopo_averages import get_bopo_averages
 from packages.core.bowling.bopo_standings import get_bopo_standings
-from packages.core.bowling.casco_monday import get_casco_monday
+from packages.core.bowling.casco_monday import get_casco_monday, get_casco_monday_team_summary
 from packages.core.bowling.casco_stats import get_casco_monday_bowlers
 
 
@@ -99,6 +99,18 @@ def casco_monday(
     team_name: Optional[str] = None, force_refresh: bool = False, debug: bool = False
 ) -> Dict[str, Any]:
     result = get_casco_monday(
+        team_name=team_name, force_refresh=force_refresh, debug=debug
+    )
+    if result.get("status") != "ok":
+        raise HTTPException(status_code=400, detail=result.get("error", "casco_failed"))
+    return result
+
+
+@router.get("/casco/monday/team-summary")
+def casco_monday_team_summary(
+    team_name: str, force_refresh: bool = False, debug: bool = False
+) -> Dict[str, Any]:
+    result = get_casco_monday_team_summary(
         team_name=team_name, force_refresh=force_refresh, debug=debug
     )
     if result.get("status") != "ok":

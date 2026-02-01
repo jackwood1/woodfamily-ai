@@ -175,3 +175,26 @@ def test_casco_monday_bowlers_team_filter(monkeypatch):
     )
     assert response.status_code == 200
     assert response.json()["bowlers"][0]["team"] == "Beer Frame"
+
+
+def test_casco_monday_team_summary(monkeypatch):
+    monkeypatch.setattr(
+        bowling_module,
+        "get_casco_monday_team_summary",
+        lambda team_name, force_refresh=False, debug=False: {
+            "status": "ok",
+            "team_summary": {
+                "team": team_name,
+                "position": 3,
+                "points": 25,
+                "points_from_first": 1,
+                "schedule": [{"date": "2/2", "time": "5:30", "lane": "15"}],
+            },
+        },
+    )
+    client = TestClient(app)
+    response = client.get(
+        "/api/bowling/casco/monday/team-summary?team_name=Beer%20Frame"
+    )
+    assert response.status_code == 200
+    assert response.json()["team_summary"]["team"] == "Beer Frame"

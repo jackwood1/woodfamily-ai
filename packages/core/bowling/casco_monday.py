@@ -57,7 +57,9 @@ def get_casco_monday(
     text = _extract_pdf_text(pdf_bytes)
     client = llm or OpenAIClient()
     standings_text, schedule_text = _split_sections(text)
-    standings = _extract_standings_with_llm(standings_text, client)
+    standings = _extract_standings_from_pdf(pdf_bytes)
+    if not standings:
+        standings = _extract_standings_with_llm(standings_text, client)
     schedule, debug_info = _extract_schedule_from_pdf(pdf_bytes, debug=debug)
     if not schedule:
         schedule = _extract_schedule_from_text(schedule_text)
@@ -74,6 +76,93 @@ def get_casco_monday(
     }
     if debug and debug_info:
         response["debug"] = debug_info
+    return response
+
+
+def get_casco_monday_team_summary(
+    team_name: str,
+    llm: Optional[OpenAIClient] = None,
+    force_refresh: bool = False,
+    debug: bool = False,
+) -> Dict[str, Any]:
+    store = _store()
+    pdf_url = os.getenv("CASCO_MONDAY_URL", DEFAULT_CASCO_MONDAY_URL)
+    cache_path = _cache_path()
+    fetch_state = store.get_bowling_fetch(DEFAULT_CACHE_KEY)
+    if not force_refresh and os.path.exists(cache_path):
+        with open(cache_path, "rb") as handle:
+            pdf_bytes = handle.read()
+    else:
+        pdf_bytes = fetch_pdf(pdf_url)
+        _write_cache_pdf(cache_path, pdf_bytes)
+        _log_file_fetched(pdf_url, cache_path)
+        _upsert_fetch_state(store, DEFAULT_CACHE_KEY, pdf_url, cache_path)
+    text = _extract_pdf_text(pdf_bytes)
+    standings = _extract_standings_from_pdf(pdf_bytes)
+    if not standings:
+        client = llm or OpenAIClient()
+        standings = _extract_standings_with_llm(_split_sections(text)[0], client)
+    schedule_text = _split_sections(text)[1]
+    schedule_table_text = _extract_schedule_table_text(pdf_bytes)
+    table_schedule, table_debug = _extract_team_schedule_from_table(
+        pdf_bytes, team_name, debug=debug
+    )
+    schedule, _ = _extract_schedule_from_pdf(pdf_bytes, debug=False)
+    if not schedule:
+        schedule = _extract_schedule_from_text(schedule_text)
+    client = llm or OpenAIClient()
+    llm_input = schedule_text
+    if schedule_table_text:
+        llm_input = f"{schedule_text}\n\nSchedule table:\n{schedule_table_text}"
+    llm_schedule = _extract_team_schedule_with_llm(llm_input, team_name, client)
+    if llm_schedule:
+        schedule = [
+            {"date": row.get("date"), "time": row.get("time"), "lane": row.get("lane"), "team_a": team_name, "team_b": ""}
+            for row in llm_schedule
+            if row.get("date") and row.get("time")
+        ]
+    if table_schedule:
+        schedule = [
+            {
+                "date": row.get("date"),
+                "time": row.get("time"),
+                "lane": row.get("lane"),
+                "team_a": team_name,
+                "team_b": "",
+            }
+            for row in table_schedule
+        ]
+    if not _extract_team_schedule_from_parsed(schedule, team_name):
+        text_schedule = _extract_team_schedule_from_text(schedule_text, team_name)
+        if text_schedule:
+            schedule = [
+                {"date": row.get("date"), "time": row.get("time"), "lane": row.get("lane"), "team_a": team_name, "team_b": ""}
+                for row in text_schedule
+            ]
+    local_summary = _build_team_summary_from_parsed(team_name, standings, schedule)
+    if local_summary is None:
+        client = llm or OpenAIClient()
+        summary = _extract_team_summary_with_llm(text, team_name, client)
+        if summary.get("status") == "ok":
+            summary["source_url"] = pdf_url
+            summary["source_path"] = cache_path
+            summary["cached"] = not force_refresh and not _should_refresh(fetch_state, pdf_url)
+            if debug:
+                summary["debug"] = _build_team_summary_debug(
+                    team_name, standings, schedule, schedule_text
+                )
+        return summary
+    response = {
+        "status": "ok",
+        "team_summary": local_summary,
+        "source_url": pdf_url,
+        "source_path": cache_path,
+        "cached": not force_refresh and not _should_refresh(fetch_state, pdf_url),
+    }
+    if debug:
+        response["debug"] = _build_team_summary_debug(
+            team_name, standings, schedule, schedule_text, table_debug
+        )
     return response
 
 
@@ -183,6 +272,53 @@ def _extract_standings_with_llm(text: str, llm: OpenAIClient) -> List[Dict[str, 
     return []
 
 
+def _extract_team_summary_with_llm(
+    text: str, team_name: str, llm: OpenAIClient
+) -> Dict[str, Any]:
+    trimmed = _truncate_text(text)
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You extract a single team's bowling standings and schedule from text. "
+                "Return JSON only, with no extra commentary."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                "From the PDF text below, return a JSON object for the team "
+                f"\"{team_name}\" with:\n"
+                "- team\n"
+                "- points (number)\n"
+                "- points_from_first (number)\n"
+                "- schedule: array of items with date, time, lane\n"
+                "The schedule dates come from the columns in the schedule table, "
+                "and the time/lane come from the cell for the team's row. "
+                "Return only the JSON object.\n\n"
+                f"Text:\n{trimmed}"
+            ),
+        },
+    ]
+    response = llm.chat(messages=messages, tools=[])
+    content = (
+        response.get("choices", [{}])[0]
+        .get("message", {})
+        .get("content", "")
+        .strip()
+    )
+    try:
+        parsed = json.loads(content)
+        if isinstance(parsed, dict):
+            return {"status": "ok", "team_summary": parsed}
+    except json.JSONDecodeError:
+        extracted = _extract_json_object(content)
+        if extracted is not None:
+            return {"status": "ok", "team_summary": extracted}
+    logger.warning("Casco Monday team summary LLM response not JSON")
+    return {"status": "error", "error": "team_summary_parse_failed"}
+
+
 def _extract_schedule_with_llm(text: str, llm: OpenAIClient) -> List[Dict[str, Any]]:
     trimmed = _truncate_text(text)
     messages = [
@@ -219,6 +355,49 @@ def _extract_schedule_with_llm(text: str, llm: OpenAIClient) -> List[Dict[str, A
         if extracted is not None:
             return extracted
     logger.warning("Casco Monday schedule LLM response not JSON")
+    return []
+
+
+def _extract_team_schedule_with_llm(
+    text: str, team_name: str, llm: OpenAIClient
+) -> List[Dict[str, Any]]:
+    trimmed = _truncate_text(text)
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You extract a single team's bowling schedule from text. "
+                "Return JSON only, with no extra commentary."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"From the schedule text below, return a JSON array for team "
+                f"\"{team_name}\". Each item must include: date, time, lane. "
+                "If a lane is missing, return null for lane. "
+                "Use the schedule table if present for column alignment. "
+                "Return only the JSON array.\n\n"
+                f"Text:\n{trimmed}"
+            ),
+        },
+    ]
+    response = llm.chat(messages=messages, tools=[])
+    content = (
+        response.get("choices", [{}])[0]
+        .get("message", {})
+        .get("content", "")
+        .strip()
+    )
+    try:
+        parsed = json.loads(content)
+        if isinstance(parsed, list):
+            return parsed
+    except json.JSONDecodeError:
+        extracted = _extract_json_array(content)
+        if extracted is not None:
+            return extracted
+    logger.warning("Casco Monday team schedule LLM response not JSON")
     return []
 
 
@@ -314,9 +493,160 @@ def _extract_schedule_from_pdf(
                     table_debugs.append(table_debug)
                 if parsed:
                     schedule.extend(parsed)
+    if not schedule:
+        schedule = _extract_schedule_from_text(_extract_pdf_text(data))
     if debug and table_debugs:
         debug_info = {"tables": table_debugs}
     return _dedupe_schedule(schedule), debug_info
+
+
+def _extract_schedule_table_text(data: bytes) -> str:
+    _ensure_pdf_available()
+    rows: List[List[str]] = []
+    with pdfplumber.open(io.BytesIO(data)) as pdf:  # type: ignore[union-attr]
+        for page in pdf.pages:
+            tables = _extract_tables_from_page(page)
+            for table in tables:
+                cleaned = [[_clean_cell(cell) for cell in row] for row in table]
+                if _looks_like_schedule_table(cleaned):
+                    rows = cleaned
+                    break
+            if rows:
+                break
+    if not rows:
+        return ""
+    lines: List[str] = []
+    for row in rows:
+        if not any(row):
+            continue
+        lines.append(" | ".join(cell for cell in row if cell))
+    return "\n".join(lines)
+
+
+def _looks_like_schedule_table(rows: List[List[str]]) -> bool:
+    has_week = False
+    has_date = False
+    for row in rows:
+        joined = " ".join(cell.lower() for cell in row if cell)
+        if "week number" in joined:
+            has_week = True
+        if "date" in joined:
+            has_date = True
+    return has_week and has_date
+
+
+def _extract_team_schedule_from_table(
+    data: bytes, team_name: str, debug: bool = False
+) -> tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    _ensure_pdf_available()
+    team_key = team_name.strip().lower()
+    with pdfplumber.open(io.BytesIO(data)) as pdf:  # type: ignore[union-attr]
+        for page in pdf.pages:
+            tables = _extract_tables_from_page(page)
+            for table in tables:
+                cleaned = [[_clean_cell(cell) for cell in row] for row in table]
+                if not _looks_like_schedule_table(cleaned):
+                    continue
+                date_row = _find_best_date_row(cleaned)
+                if date_row is None:
+                    continue
+                expanded_date_columns = _expand_date_columns(date_row)
+                if not expanded_date_columns:
+                    continue
+                start_idx = cleaned.index(date_row) + 1
+                for idx, row in enumerate(cleaned[start_idx:], start=start_idx):
+                    if not any(row):
+                        continue
+                    if any(team_key == cell.strip().lower() for cell in row if cell):
+                        time_row = row
+                        if _count_time_tokens(time_row) == 0 and idx > 0:
+                            prev_row = cleaned[idx - 1]
+                            if _count_time_tokens(prev_row) > 0:
+                                time_row = prev_row
+                        schedule = _build_team_schedule_from_row_with_columns(
+                            time_row, expanded_date_columns
+                        )
+                        if debug:
+                            return schedule, {
+                                "date_row": date_row,
+                                "team_row": row,
+                                "time_row": time_row,
+                                "date_columns": expanded_date_columns,
+                            }
+                        return schedule, None
+    return [], None
+
+
+def _build_team_schedule_from_row_with_columns(
+    row: List[str], date_columns: List[tuple[int, str]]
+) -> List[Dict[str, Any]]:
+    schedule: List[Dict[str, Any]] = []
+    for col_idx, date_value in date_columns:
+        cell = row[col_idx] if col_idx < len(row) else ""
+        time_value, lane_value, _ = _parse_schedule_cell(cell)
+        if time_value is None and lane_value is None:
+            numeric = _extract_cell_numeric(cell)
+            lane_value = numeric
+        schedule.append(
+            {
+                "date": date_value,
+                "time": time_value,
+                "lane": lane_value,
+            }
+        )
+    return schedule
+
+
+def _find_best_date_row(rows: List[List[str]]) -> Optional[List[str]]:
+    best_row = None
+    best_count = 0
+    for row in rows:
+        count = len(_extract_date_columns(row))
+        if count > best_count:
+            best_count = count
+            best_row = row
+    return best_row
+
+
+def _expand_date_columns(row: List[str]) -> List[tuple[int, str]]:
+    expanded: List[tuple[int, str]] = []
+    for idx, cell in enumerate(row):
+        if not cell:
+            continue
+        dates = re.findall(r"\b\d{1,2}/\d{1,2}\b", cell)
+        if not dates:
+            continue
+        for offset, date_value in enumerate(dates):
+            expanded.append((idx + offset, date_value))
+    return expanded
+
+
+def _extract_cell_numeric(cell: str) -> Optional[str]:
+    if not cell:
+        return None
+    match = re.search(r"\b\d{1,2}\b", cell)
+    return match.group(0) if match else None
+
+
+def _count_time_tokens(row: List[str]) -> int:
+    count = 0
+    for cell in row:
+        if cell and re.search(r"\b\d{1,2}:\d{2}\b", cell):
+            count += 1
+    return count
+
+
+def _extract_standings_from_pdf(data: bytes) -> List[Dict[str, Any]]:
+    _ensure_pdf_available()
+    standings: List[Dict[str, Any]] = []
+    with pdfplumber.open(io.BytesIO(data)) as pdf:  # type: ignore[union-attr]
+        for page in pdf.pages:
+            tables = _extract_tables_from_page(page)
+            for table in tables:
+                parsed = _parse_standings_table(table)
+                if parsed:
+                    standings.extend(parsed)
+    return standings
 
 
 def _extract_tables_from_page(page: Any) -> List[List[List[Optional[str]]]]:
@@ -356,15 +686,25 @@ def _parse_schedule_table(
     start_idx = (date_idx + 1) if date_idx is not None else 0
     team_map = _build_team_map(rows, start_idx)
     schedule: List[Dict[str, Any]] = []
-    for row in rows[start_idx:]:
+    idx = start_idx
+    while idx < len(rows):
+        row = rows[idx]
         team_number, team_name = _parse_team_row_header(row)
         if not team_name:
+            idx += 1
             continue
+        opponent_row = (
+            rows[idx + 1] if idx + 1 < len(rows) and _looks_like_opponent_row(rows[idx + 1]) else None
+        )
         for col_idx, date_value in date_columns.items():
             cell = row[col_idx] if col_idx < len(row) else ""
             if not cell or "postponed" in cell.lower():
                 continue
             time_value, lane_value, opponent_number = _parse_schedule_cell(cell)
+            if opponent_row and col_idx < len(opponent_row):
+                opponent_cell = opponent_row[col_idx]
+                if opponent_cell and opponent_cell.strip().isdigit():
+                    opponent_number = opponent_cell.strip()
             if not time_value:
                 continue
             opponent_name = team_map.get(opponent_number) if opponent_number else None
@@ -379,9 +719,245 @@ def _parse_schedule_table(
                     "opponent_number": opponent_number,
                 }
             )
+        idx += 2 if opponent_row else 1
     if debug:
         return schedule, _build_schedule_debug(rows, week_idx, date_idx, date_columns)
     return schedule, None
+
+
+def _parse_standings_table(table: List[List[Optional[str]]]) -> List[Dict[str, Any]]:
+    rows = [[_clean_cell(cell) for cell in row] for row in table]
+    if not rows:
+        return []
+    header_idx = _find_standings_header_index(rows)
+    if header_idx is None:
+        return []
+    header = rows[header_idx]
+    tm_idx = _find_header_col(header, ["tm", "tm #", "team #"])
+    name_idx = _find_header_col(header, ["name", "team"])
+    captain_idx = _find_header_col(header, ["captain"])
+    points_idx = _find_header_col(header, ["points", "pts"])
+    parsed: List[Dict[str, Any]] = []
+    for row in rows[header_idx + 1 :]:
+        if not any(row):
+            continue
+        if tm_idx is None or name_idx is None or points_idx is None:
+            continue
+        tm_value = row[tm_idx] if tm_idx < len(row) else ""
+        team = row[name_idx] if name_idx < len(row) else ""
+        points_value = row[points_idx] if points_idx < len(row) else ""
+        if not tm_value or not tm_value.strip().isdigit():
+            continue
+        if not team or not points_value:
+            continue
+        points = _to_points(points_value)
+        if points is None:
+            continue
+        parsed.append(
+            {
+                "team_number": tm_value,
+                "team": team,
+                "captain": row[captain_idx] if captain_idx is not None and captain_idx < len(row) else None,
+                "points": points,
+            }
+        )
+    return parsed
+
+
+def _find_standings_header_index(rows: List[List[str]]) -> Optional[int]:
+    for idx, row in enumerate(rows):
+        lowered_cells = [cell.lower() for cell in row if cell]
+        if (
+            any("tm" in cell for cell in lowered_cells)
+            and any("name" in cell for cell in lowered_cells)
+            and any("captain" in cell for cell in lowered_cells)
+            and any("points" in cell for cell in lowered_cells)
+        ):
+            return idx
+    return None
+
+
+def _find_header_col(header: List[str], keys: List[str]) -> Optional[int]:
+    for idx, cell in enumerate(header):
+        normalized = cell.lower().strip()
+        for key in keys:
+            if key in normalized:
+                return idx
+    return None
+
+
+def _to_points(value: str) -> Optional[float]:
+    cleaned = value.replace(",", "").strip()
+    if not cleaned:
+        return None
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
+
+
+def _build_team_summary_from_parsed(
+    team_name: str,
+    standings: List[Dict[str, Any]],
+    schedule: List[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    team_key = team_name.strip().lower()
+    normalized: List[Dict[str, Any]] = []
+    for row in standings:
+        points = row.get("points")
+        points_value = _to_points(str(points)) if points is not None else None
+        normalized.append(
+            {
+                "team": row.get("team"),
+                "points": points_value,
+            }
+        )
+    normalized = [row for row in normalized if row.get("team") and row.get("points") is not None]
+    if not normalized:
+        return None
+    sorted_rows = sorted(
+        normalized,
+        key=lambda row: float(row.get("points") or 0),
+        reverse=True,
+    )
+    top_points = float(sorted_rows[0]["points"])
+    team_row = None
+    for idx, row in enumerate(sorted_rows, start=1):
+        if str(row["team"]).strip().lower() == team_key:
+            team_row = {"position": idx, "team": row["team"], "points": row["points"]}
+            break
+    if team_row is None:
+        return None
+    team_row["points_from_first"] = round(top_points - float(team_row["points"]), 2)
+    team_schedule = _extract_team_schedule_from_parsed(schedule, team_name)
+    return {
+        "team": team_row["team"],
+        "position": team_row["position"],
+        "points": team_row["points"],
+        "points_from_first": team_row["points_from_first"],
+        "schedule": team_schedule,
+    }
+
+
+def _build_team_summary_debug(
+    team_name: str,
+    standings: List[Dict[str, Any]],
+    schedule: List[Dict[str, Any]],
+    schedule_text: str,
+    table_debug: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    team_key = team_name.strip().lower()
+    standings_sample = [row.get("team") for row in standings[:15] if row.get("team")]
+    team_schedule = _extract_team_schedule_from_parsed(schedule, team_name)
+    schedule_sample = [
+        {
+            "date": row.get("date"),
+            "time": row.get("time"),
+            "lane": row.get("lane"),
+            "team_a": row.get("team_a"),
+            "team_b": row.get("team_b"),
+        }
+        for row in team_schedule[:10]
+    ]
+    debug_payload = {
+        "standings_count": len(standings),
+        "standings_sample": standings_sample,
+        "schedule_count": len(schedule),
+        "team_schedule_count": len(team_schedule),
+        "team_schedule_sample": schedule_sample,
+    }
+    debug_payload.update(_debug_schedule_text(schedule_text))
+    if table_debug:
+        debug_payload["table_debug"] = table_debug
+    return debug_payload
+
+
+def _debug_schedule_text(text: str) -> Dict[str, Any]:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    date_idx = _find_line_index(lines, "date:")
+    date_line = lines[date_idx] if date_idx is not None else None
+    dates = _extract_dates_from_line(date_line or "")
+    team_rows = _parse_team_rows_with_dates(
+        lines[(date_idx + 1) :] if date_idx is not None else [], dates
+    )
+    team_row_samples = []
+    for row in team_rows[:5]:
+        team_row_samples.append(
+            {
+                "team_number": row.get("team_number"),
+                "team_name": row.get("team_name"),
+                "time_lane_pairs": row.get("time_lane_pairs"),
+                "opponent_numbers": row.get("opponent_numbers"),
+            }
+        )
+    return {
+        "schedule_text_sample": lines[:10],
+        "date_line": date_line,
+        "date_columns": dates,
+        "team_rows_count": len(team_rows),
+        "team_rows_sample": team_row_samples,
+    }
+
+
+def _extract_team_schedule_from_parsed(
+    schedule: List[Dict[str, Any]], team_name: str
+) -> List[Dict[str, Any]]:
+    team_key = team_name.strip().lower()
+    return [
+        {
+            "date": row.get("date"),
+            "time": row.get("time"),
+            "lane": row.get("lane"),
+            "team_a": row.get("team_a"),
+            "team_b": row.get("team_b"),
+        }
+        for row in schedule
+        if str(row.get("team_a") or "").strip().lower() == team_key
+        or str(row.get("team_b") or "").strip().lower() == team_key
+    ]
+
+
+def _extract_team_schedule_from_text(
+    text: str, team_name: str
+) -> List[Dict[str, Any]]:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    date_idx = _find_line_index(lines, "date:")
+    if date_idx is None:
+        return []
+    dates = _extract_dates_from_line(lines[date_idx])
+    if not dates:
+        return []
+    team_key = team_name.strip().lower()
+    last_time_pairs: List[tuple[Optional[str], Optional[str]]] = []
+    for line in lines[date_idx + 1 :]:
+        if _line_has_time_pairs(line):
+            last_time_pairs = _parse_time_lane_line(line, len(dates))
+            continue
+        if team_key not in line.lower():
+            continue
+        if not last_time_pairs:
+            continue
+        schedule: List[Dict[str, Any]] = []
+        for idx, date_value in enumerate(dates):
+            if idx >= len(last_time_pairs):
+                continue
+            time_value, lane_value = last_time_pairs[idx]
+            if not time_value:
+                continue
+            schedule.append(
+                {"date": date_value, "time": time_value, "lane": lane_value}
+            )
+        return schedule
+    return []
+
+
+def _looks_like_opponent_row(row: List[str]) -> bool:
+    if not row:
+        return False
+    if any(re.search(r"[A-Za-z]", cell) for cell in row if cell):
+        return False
+    digit_count = sum(1 for cell in row if cell and cell.strip().isdigit())
+    return digit_count >= 2
 
 
 def _build_schedule_debug(
@@ -451,9 +1027,12 @@ def _parse_schedule_cell(cell: str) -> tuple[Optional[str], Optional[str], Optio
     lines = [line.strip() for line in cell.splitlines() if line.strip()]
     text = " ".join(lines)
     time_match = re.search(r"\b\d{1,2}:\d{2}\b", text)
-    lane_match = re.search(r"\b\d{1,2}\b", text)
     time_value = time_match.group(0) if time_match else None
-    lane_value = lane_match.group(0) if lane_match else None
+    lane_value = None
+    if time_match:
+        remainder = text[time_match.end() :]
+        lane_match = re.search(r"\b\d{1,2}\b", remainder)
+        lane_value = lane_match.group(0) if lane_match else None
     opponent_number = None
     for line in lines[1:]:
         if line.isdigit():
@@ -476,7 +1055,7 @@ def _extract_schedule_from_text(text: str) -> List[Dict[str, Any]]:
     dates = _extract_dates_from_line(lines[date_idx])
     if not dates:
         return []
-    team_rows = _parse_team_rows(lines[date_idx + 1 :])
+    team_rows = _parse_team_rows_with_dates(lines[date_idx + 1 :], dates)
     team_map = {row["team_number"]: row["team_name"] for row in team_rows}
     schedule: List[Dict[str, Any]] = []
     for row in team_rows:
@@ -517,21 +1096,38 @@ def _extract_dates_from_line(line: str) -> List[str]:
 
 
 def _parse_team_rows(lines: List[str]) -> List[Dict[str, Any]]:
+    return _parse_team_rows_with_dates(lines, [])
+
+
+def _parse_team_rows_with_dates(lines: List[str], dates: List[str]) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     idx = 0
+    date_len = len(dates)
+    last_time_pairs: List[tuple[Optional[str], Optional[str]]] = []
     while idx < len(lines):
         line = lines[idx]
-        match = re.match(r"^(\d+)\s+(.+?)\s+(\d{1,2}:\d{2})", line)
-        if not match:
+        if _line_has_time_pairs(line):
+            last_time_pairs = _parse_time_lane_line(line, date_len)
             idx += 1
             continue
-        team_number = match.group(1)
-        team_name = match.group(2).strip()
-        time_lane_pairs = _extract_time_lane_pairs(line)
-        opponent_numbers: List[str] = []
-        if idx + 1 < len(lines) and _looks_like_opponent_line(lines[idx + 1]):
-            opponent_numbers = re.findall(r"\b\d+\b", lines[idx + 1])
+        if not line[0].isdigit():
             idx += 1
+            continue
+        if idx + 1 >= len(lines):
+            idx += 1
+            continue
+        if not _looks_like_opponent_line(lines[idx + 1]):
+            idx += 1
+            continue
+        team_number, team_name = _parse_team_header(line)
+        time_lane_pairs = last_time_pairs
+        if not team_name:
+            idx += 1
+            continue
+        if not time_lane_pairs:
+            idx += 1
+            continue
+        opponent_numbers = re.findall(r"\b\d+\b", lines[idx + 1])
         rows.append(
             {
                 "team_number": team_number,
@@ -540,8 +1136,46 @@ def _parse_team_rows(lines: List[str]) -> List[Dict[str, Any]]:
                 "opponent_numbers": opponent_numbers,
             }
         )
-        idx += 1
+        last_time_pairs = []
+        idx += 2
     return rows
+
+
+def _parse_team_header(line: str) -> tuple[Optional[str], Optional[str]]:
+    tokens = line.split()
+    if not tokens or not tokens[0].isdigit():
+        return None, None
+    team_number = tokens[0]
+    team_name = " ".join(tokens[1:]).strip()
+    return team_number, team_name
+
+
+def _is_time_token(token: str) -> bool:
+    return bool(re.fullmatch(r"\d{1,2}:\d{2}", token))
+
+
+def _line_has_time_pairs(line: str) -> bool:
+    return any(_is_time_token(token) for token in line.split())
+
+
+def _parse_time_lane_line(
+    line: str, date_len: int
+) -> List[tuple[Optional[str], Optional[str]]]:
+    tokens = line.split()
+    pairs: List[tuple[Optional[str], Optional[str]]] = []
+    idx = 0
+    while idx < len(tokens):
+        token = tokens[idx]
+        if not _is_time_token(token):
+            idx += 1
+            continue
+        time_value = token
+        lane_value = tokens[idx + 1] if idx + 1 < len(tokens) and tokens[idx + 1].isdigit() else None
+        pairs.append((time_value, lane_value))
+        idx += 2
+    if date_len and len(pairs) > date_len:
+        pairs = pairs[:date_len]
+    return pairs
 
 
 def _extract_time_lane_pairs(line: str) -> List[tuple[Optional[str], Optional[str]]]:
