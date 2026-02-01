@@ -9,6 +9,7 @@ from typing import List, Optional
 from .base import (
     BowlingMatchState,
     BowlingStatState,
+    BowlingFetchState,
     CalendarEventState,
     ListItem,
     ListStore,
@@ -135,6 +136,17 @@ class SQLiteListStore(ListStore):
                     raw_json TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS bowling_fetches (
+                    league_key TEXT PRIMARY KEY,
+                    last_fetch_at TEXT NOT NULL,
+                    stats_url TEXT,
+                    schedule_url TEXT,
+                    standings_url TEXT
                 )
                 """
             )
@@ -735,3 +747,46 @@ class SQLiteListStore(ListStore):
                 )
                 for row in rows
             ]
+
+    def upsert_bowling_fetch(self, fetch: BowlingFetchState) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO bowling_fetches (
+                    league_key, last_fetch_at, stats_url, schedule_url, standings_url
+                )
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(league_key) DO UPDATE SET
+                    last_fetch_at = excluded.last_fetch_at,
+                    stats_url = excluded.stats_url,
+                    schedule_url = excluded.schedule_url,
+                    standings_url = excluded.standings_url
+                """,
+                (
+                    fetch.league_key,
+                    fetch.last_fetch_at,
+                    fetch.stats_url,
+                    fetch.schedule_url,
+                    fetch.standings_url,
+                ),
+            )
+
+    def get_bowling_fetch(self, league_key: str) -> Optional[BowlingFetchState]:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT league_key, last_fetch_at, stats_url, schedule_url, standings_url
+                FROM bowling_fetches
+                WHERE league_key = ?
+                """,
+                (league_key,),
+            ).fetchone()
+            if row is None:
+                return None
+            return BowlingFetchState(
+                league_key=row[0],
+                last_fetch_at=row[1],
+                stats_url=row[2],
+                schedule_url=row[3],
+                standings_url=row[4],
+            )

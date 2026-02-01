@@ -183,3 +183,21 @@ class BowlingStore(Protocol):
         date_to: Optional[str] = None,
     ) -> List[BowlingMatchState]:
         """List bowling matches for a league."""
+
+
+@dataclass(frozen=True)
+class BowlingFetchState:
+    league_key: str
+    last_fetch_at: str
+    stats_url: Optional[str]
+    schedule_url: Optional[str]
+    standings_url: Optional[str]
+
+
+@runtime_checkable
+class BowlingFetchStore(Protocol):
+    def upsert_bowling_fetch(self, fetch: BowlingFetchState) -> None:
+        """Insert or update bowling fetch metadata."""
+
+    def get_bowling_fetch(self, league_key: str) -> Optional[BowlingFetchState]:
+        """Return fetch metadata for a league."""

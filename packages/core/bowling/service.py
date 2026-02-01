@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
+from urllib.parse import urljoin
 
-from packages.core.storage.base import BowlingMatchState, BowlingStatState
+from packages.core.storage.base import (
+    BowlingFetchState,
+    BowlingMatchState,
+    BowlingStatState,
+)
 from packages.core.storage.sqlite import SQLiteListStore
 
 from .config import get_league, load_bowling_config
@@ -18,6 +23,7 @@ class BowlingService:
         base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
         default_db = os.path.join(base_dir, "apps", "api", "data", "lists.db")
         self._store = SQLiteListStore(db_path=db_path or os.getenv("HOME_OPS_DB_PATH", default_db))
+        self._refresh_days = int(os.getenv("BOWLING_REFRESH_DAYS", "7"))
 
     def list_leagues(self) -> List[Dict[str, Any]]:
         return self._config.get("leagues", [])
@@ -27,12 +33,11 @@ class BowlingService:
         if not league:
             return {"status": "error", "error": "league_not_found", "league_key": league_key}
 
-        listing_url = league.get("listing_url")
-        listing_html = fetch_html(listing_url) if listing_url else None
-        stats_url = _resolve_pdf_url(listing_html, league.get("stats_match"), league.get("stats_url"))
-        schedule_url = _resolve_pdf_url(
-            listing_html, league.get("schedule_match"), league.get("schedule_url")
-        )
+        resolved = _resolve_league_urls(league)
+        listing_url = resolved["listing_url"]
+        stats_url = resolved["stats_url"]
+        schedule_url = resolved["schedule_url"]
+        standings_url = resolved["standings_url"]
         stats_pdf = safe_fetch_pdf(stats_url)
         schedule_pdf = safe_fetch_pdf(schedule_url)
         stats_rows = parse_stats_pdf(stats_pdf) if stats_pdf else []
@@ -73,6 +78,15 @@ class BowlingService:
         ]
         self._store.save_bowling_stats(league_key, stats)
         self._store.save_bowling_matches(league_key, matches)
+        self._store.upsert_bowling_fetch(
+            BowlingFetchState(
+                league_key=league_key,
+                last_fetch_at=timestamp,
+                stats_url=stats_url,
+                schedule_url=schedule_url,
+                standings_url=standings_url,
+            )
+        )
         return {
             "status": "ok",
             "league_key": league_key,
@@ -80,9 +94,12 @@ class BowlingService:
             "matches": len(matches),
             "stats_url": stats_url,
             "schedule_url": schedule_url,
+            "standings_url": standings_url,
+            "last_fetch_at": timestamp,
         }
 
     def list_teams(self, league_key: str) -> List[Dict[str, Any]]:
+        self._ensure_league_data(league_key)
         league = get_league(self._config, league_key)
         if league and league.get("teams"):
             return league.get("teams", [])
@@ -91,10 +108,12 @@ class BowlingService:
         return [{"name": team} for team in teams]
 
     def team_stats(self, league_key: str, team_name: str) -> List[Dict[str, Any]]:
+        self._ensure_league_data(league_key)
         stats = self._store.list_bowling_stats(league_key, team_name=team_name)
         return [self._stat_to_dict(stat) for stat in stats]
 
     def player_stats(self, league_key: str, player_name: str) -> List[Dict[str, Any]]:
+        self._ensure_league_data(league_key)
         stats = self._store.list_bowling_stats(league_key, player_name=player_name)
         return [self._stat_to_dict(stat) for stat in stats]
 
@@ -105,6 +124,7 @@ class BowlingService:
         date_from: Optional[str] = None,
         date_to: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
+        self._ensure_league_data(league_key)
         matches = self._store.list_bowling_matches(
             league_key, team_name=team_name, date_from=date_from, date_to=date_to
         )
@@ -133,9 +153,52 @@ class BowlingService:
             "points": stat.points,
         }
 
+    def _ensure_league_data(self, league_key: str) -> None:
+        if not get_league(self._config, league_key):
+            return
+        if not self._should_refresh(league_key):
+            return
+        self.sync_league(league_key)
+
+    def _should_refresh(self, league_key: str) -> bool:
+        fetch_state = self._store.get_bowling_fetch(league_key)
+        if fetch_state is None:
+            return True
+        try:
+            last_fetch = datetime.fromisoformat(fetch_state.last_fetch_at)
+        except ValueError:
+            return True
+        age = datetime.now() - last_fetch
+        if age > timedelta(days=self._refresh_days):
+            return True
+        return False
+
+
+def _resolve_league_urls(league: Dict[str, Any]) -> Dict[str, Optional[str]]:
+    listing_url = league.get("listing_url")
+    listing_html = fetch_html(listing_url) if listing_url else None
+    stats_url = _resolve_pdf_url(
+        listing_html, listing_url, league.get("stats_match"), league.get("stats_url")
+    )
+    schedule_url = _resolve_pdf_url(
+        listing_html, listing_url, league.get("schedule_match"), league.get("schedule_url")
+    )
+    standings_url = _resolve_pdf_url(
+        listing_html, listing_url, league.get("standings_match"), league.get("standings_url")
+    )
+    return {
+        "listing_url": listing_url,
+        "stats_url": stats_url,
+        "schedule_url": schedule_url,
+        "standings_url": standings_url,
+    }
+
 
 def _resolve_pdf_url(
-    html: Optional[str], match_text: Optional[str], fallback_url: Optional[str]
+    html: Optional[str],
+    base_url: Optional[str],
+    match_text: Optional[str],
+    fallback_url: Optional[str],
 ) -> Optional[str]:
     if match_text is None:
         return fallback_url
@@ -143,10 +206,13 @@ def _resolve_pdf_url(
     if not candidates:
         return fallback_url
     lowered_match = match_text.lower()
-    for text, href in candidates:
-        if lowered_match in text.lower():
-            return href
-    return fallback_url
+    matching = [link for link in candidates if lowered_match in link[0].lower()]
+    if not matching:
+        return fallback_url
+    href = matching[-1][1]
+    if base_url:
+        return urljoin(base_url, href)
+    return href
 
 
 def _extract_pdf_links(html: str) -> List[tuple[str, str]]:

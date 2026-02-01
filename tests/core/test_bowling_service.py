@@ -72,3 +72,113 @@ def test_sync_league_saves_stats_and_matches(tmp_path, monkeypatch):
 
     matches = service.list_matches("monday_bayside", team_name="Strikers")
     assert matches[0]["lane"] == "12"
+
+
+def test_team_stats_auto_syncs_when_missing(tmp_path, monkeypatch):
+    config_path = tmp_path / "bowling.json"
+    config_path.write_text(
+        """
+        {
+          "leagues": [
+            {
+              "key": "monday_bayside",
+              "name": "Monday at Bayside",
+              "listing_url": "https://example.com/listing",
+              "stats_match": "Bowling Statistics",
+              "schedule_match": "Schedule"
+            }
+          ]
+        }
+        """.strip()
+    )
+    db_path = tmp_path / "lists.db"
+
+    monkeypatch.setattr(
+        "packages.core.bowling.service.fetch_html",
+        lambda _: '<a href="https://example.com/stats.pdf">Bowling Statistics</a>',
+    )
+    monkeypatch.setattr(
+        "packages.core.bowling.service.safe_fetch_pdf", lambda _: b"%PDF-1.4"
+    )
+    monkeypatch.setattr(
+        "packages.core.bowling.service.parse_stats_pdf",
+        lambda _: [
+            {
+                "team_name": "Strikers",
+                "player_name": "Alex",
+                "average": 180,
+                "handicap": 10,
+                "wins": 5,
+                "losses": 2,
+                "high_game": 220,
+                "high_series": 600,
+                "points": 12,
+                "raw": {},
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        "packages.core.bowling.service.parse_schedule_pdf", lambda _: []
+    )
+
+    service = BowlingService(config_path=str(config_path), db_path=str(db_path))
+    stats = service.team_stats("monday_bayside", "Strikers")
+    assert stats[0]["player_name"] == "Alex"
+
+
+def test_team_stats_uses_cache_when_recent(tmp_path, monkeypatch):
+    config_path = tmp_path / "bowling.json"
+    config_path.write_text(
+        """
+        {
+          "leagues": [
+            {
+              "key": "monday_bayside",
+              "name": "Monday at Bayside",
+              "listing_url": "https://example.com/listing",
+              "stats_match": "Bowling Statistics",
+              "schedule_match": "Schedule"
+            }
+          ]
+        }
+        """.strip()
+    )
+    db_path = tmp_path / "lists.db"
+
+    monkeypatch.setattr(
+        "packages.core.bowling.service.fetch_html",
+        lambda _: '<a href="https://example.com/stats.pdf">Bowling Statistics</a>',
+    )
+    monkeypatch.setattr(
+        "packages.core.bowling.service.safe_fetch_pdf", lambda _: b"%PDF-1.4"
+    )
+    monkeypatch.setattr(
+        "packages.core.bowling.service.parse_stats_pdf",
+        lambda _: [
+            {
+                "team_name": "Strikers",
+                "player_name": "Alex",
+                "average": 180,
+                "handicap": 10,
+                "wins": 5,
+                "losses": 2,
+                "high_game": 220,
+                "high_series": 600,
+                "points": 12,
+                "raw": {},
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        "packages.core.bowling.service.parse_schedule_pdf", lambda _: []
+    )
+
+    service = BowlingService(config_path=str(config_path), db_path=str(db_path))
+    service.sync_league("monday_bayside")
+
+    def _no_fetch(*_args, **_kwargs):
+        raise AssertionError("fetch_html should not be called for recent cache")
+
+    monkeypatch.setattr("packages.core.bowling.service.fetch_html", _no_fetch)
+    stats = service.team_stats("monday_bayside", "Strikers")
+    assert stats[0]["player_name"] == "Alex"
