@@ -126,7 +126,7 @@ def test_casco_monday(monkeypatch):
     monkeypatch.setattr(
         bowling_module,
         "get_casco_monday",
-        lambda team_name=None: {
+        lambda team_name=None, force_refresh=False, debug=False: {
             "status": "ok",
             "source_url": "https://example.com/casco.pdf",
             "standings": [{"team": "Beer Frame", "points": 25}],

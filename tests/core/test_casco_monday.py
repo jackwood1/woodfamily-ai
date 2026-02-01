@@ -10,16 +10,20 @@ from packages.core.storage.base import BowlingFetchState, BowlingMatchState, Bow
 
 
 class _FakePage:
-    def __init__(self, text: str) -> None:
+    def __init__(self, text: str, tables: List[List[List[str]]]) -> None:
         self._text = text
+        self._tables = tables
 
     def extract_text(self):
         return self._text
 
+    def extract_tables(self, *args, **kwargs):
+        return self._tables
+
 
 class _FakePDF:
-    def __init__(self, text: str) -> None:
-        self.pages = [_FakePage(text)]
+    def __init__(self, text: str, tables: List[List[List[str]]]) -> None:
+        self.pages = [_FakePage(text, tables)]
 
     def __enter__(self):
         return self
@@ -30,40 +34,39 @@ class _FakePDF:
 
 class _FakeLLM:
     def chat(self, messages, tools):
-        return {
-            "choices": [
+        content = messages[-1]["content"]
+        if "standings text" in content.lower():
+            payload = [{"team": "Beer Frame", "points": 25, "captain": "Rob"}]
+        else:
+            payload = [
                 {
-                    "message": {
-                        "content": json.dumps(
-                            {
-                                "standings": [
-                                    {"team": "Beer Frame", "points": 25, "captain": "Rob"}
-                                ],
-                                "schedule": [
-                                    {
-                                        "date": "1/12",
-                                        "time": "5:30",
-                                        "lane": "11",
-                                        "team_a": "Beer Frame",
-                                        "team_b": "Bowl Cuts",
-                                    }
-                                ],
-                            }
-                        )
-                    }
+                    "date": "1/12",
+                    "time": "5:30",
+                    "lane": "11",
+                    "team_a": "Beer Frame",
+                    "team_b": "Bowl Cuts",
                 }
             ]
-        }
+        return {"choices": [{"message": {"content": json.dumps(payload)}}]}
 
 
 def test_get_casco_monday_fetches_and_parses(monkeypatch, tmp_path):
     monkeypatch.setenv("CASCO_MONDAY_URL", "https://example.com/casco.pdf")
     monkeypatch.setenv("HOME_OPS_DB_PATH", str(tmp_path / "lists.db"))
     monkeypatch.setattr(casco_monday, "fetch_pdf", lambda _: b"%PDF-1.4")
+    tables = [
+        [
+            ["Week Number:", "", "1", "2"],
+            ["Date:", "", "1/12", "1/19"],
+            ["1", "Beer Frame", "5:30 11\n2", "8:00 15\n3"],
+            ["2", "Bowl Cuts", "5:30 11\n1", "8:00 15\n4"],
+            ["3", "Royal Crush", "5:30 13\n1", "8:00 11\n2"],
+        ]
+    ]
     monkeypatch.setattr(
         casco_monday,
         "pdfplumber",
-        SimpleNamespace(open=lambda _: _FakePDF("Standings Schedule")),
+        SimpleNamespace(open=lambda _: _FakePDF("Standings Schedule", tables)),
         raising=False,
     )
     result = casco_monday.get_casco_monday(team_name="Beer Frame", llm=_FakeLLM())

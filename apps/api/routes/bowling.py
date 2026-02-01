@@ -9,6 +9,7 @@ from packages.core.bowling.bopo_schedule import get_bopo_schedule
 from packages.core.bowling.bopo_averages import get_bopo_averages
 from packages.core.bowling.bopo_standings import get_bopo_standings
 from packages.core.bowling.casco_monday import get_casco_monday
+from packages.core.bowling.casco_stats import get_casco_monday_bowlers
 
 
 router = APIRouter(prefix="/api/bowling", tags=["bowling"])
@@ -94,8 +95,30 @@ def bopo_standings(
 
 
 @router.get("/casco/monday")
-def casco_monday(team_name: Optional[str] = None) -> Dict[str, Any]:
-    result = get_casco_monday(team_name=team_name)
+def casco_monday(
+    team_name: Optional[str] = None, force_refresh: bool = False, debug: bool = False
+) -> Dict[str, Any]:
+    result = get_casco_monday(
+        team_name=team_name, force_refresh=force_refresh, debug=debug
+    )
+    if result.get("status") != "ok":
+        raise HTTPException(status_code=400, detail=result.get("error", "casco_failed"))
+    return result
+
+
+@router.get("/casco/monday/bowlers")
+def casco_monday_bowlers(
+    team_name: Optional[str] = None,
+    player_name: Optional[str] = None,
+    force_refresh: bool = False,
+    debug: bool = False,
+) -> Dict[str, Any]:
+    result = get_casco_monday_bowlers(
+        team_name=team_name,
+        player_name=player_name,
+        force_refresh=force_refresh,
+        debug=debug,
+    )
     if result.get("status") != "ok":
         raise HTTPException(status_code=400, detail=result.get("error", "casco_failed"))
     return result
