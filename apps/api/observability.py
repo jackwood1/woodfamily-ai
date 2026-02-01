@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from typing import Optional, Type
 
 try:
@@ -21,6 +22,8 @@ except Exception:  # pragma: no cover - optional dependency resolution
 
 
 def init_observability(service_name: str = "woodfamily.ai") -> None:
+    if "pytest" in sys.modules:
+        return
     if trace is None or TracerProvider is None:
         return
 

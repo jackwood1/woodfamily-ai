@@ -137,3 +137,22 @@ def test_casco_monday(monkeypatch):
     response = client.get("/api/bowling/casco/monday?team_name=Beer%20Frame")
     assert response.status_code == 200
     assert response.json()["standings"][0]["team"] == "Beer Frame"
+
+
+def test_casco_monday_bowlers(monkeypatch):
+    monkeypatch.setattr(
+        bowling_module,
+        "get_casco_monday_bowlers",
+        lambda team_name=None, player_name=None, force_refresh=False, debug=False: {
+            "status": "ok",
+            "stats_url": "https://example.com/casco_stats.pdf",
+            "count": 1,
+            "bowlers": [{"bowler": "Gino", "team": "Beer Frame", "average": 156}],
+        },
+    )
+    client = TestClient(app)
+    response = client.get(
+        "/api/bowling/casco/monday/bowlers?player_name=Gino"
+    )
+    assert response.status_code == 200
+    assert response.json()["bowlers"][0]["bowler"] == "Gino"
