@@ -120,3 +120,20 @@ def test_bopo_standings(monkeypatch):
     response = client.get("/api/bowling/bopo/standings?day=Tuesday%20A")
     assert response.status_code == 200
     assert response.json()["standings"][0]["team"] == "Beer Frame"
+
+
+def test_casco_monday(monkeypatch):
+    monkeypatch.setattr(
+        bowling_module,
+        "get_casco_monday",
+        lambda team_name=None: {
+            "status": "ok",
+            "source_url": "https://example.com/casco.pdf",
+            "standings": [{"team": "Beer Frame", "points": 25}],
+            "schedule": [{"team_a": "Beer Frame", "team_b": "Bowl Cuts"}],
+        },
+    )
+    client = TestClient(app)
+    response = client.get("/api/bowling/casco/monday?team_name=Beer%20Frame")
+    assert response.status_code == 200
+    assert response.json()["standings"][0]["team"] == "Beer Frame"
