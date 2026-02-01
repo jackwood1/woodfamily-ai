@@ -4,7 +4,7 @@ import json
 import os
 import sqlite3
 import uuid
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from .base import (
     BowlingMatchState,
@@ -146,10 +146,42 @@ class SQLiteListStore(ListStore):
                     last_fetch_at TEXT NOT NULL,
                     stats_url TEXT,
                     schedule_url TEXT,
-                    standings_url TEXT
+                    standings_url TEXT,
+                    file_path TEXT
                 )
                 """
             )
+            self._ensure_column(conn, "bowling_fetches", "file_path", "TEXT", "NULL")
+
+    def debug_snapshot(self, limit: int = 100) -> Dict[str, List[Dict[str, Any]]]:
+        tables = [
+            "lists",
+            "items",
+            "threads",
+            "reminders",
+            "calendar_events",
+            "bowling_stats",
+            "bowling_matches",
+            "bowling_fetches",
+        ]
+        snapshot: Dict[str, List[Dict[str, Any]]] = {}
+        with self._connect() as conn:
+            for table in tables:
+                snapshot[table] = self._read_table(conn, table, limit)
+        return snapshot
+
+    def debug_query(self, query: str) -> List[Dict[str, Any]]:
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(query).fetchall()
+            return [dict(row) for row in rows]
+
+    def _read_table(
+        self, conn: sqlite3.Connection, table: str, limit: int
+    ) -> List[Dict[str, Any]]:
+        columns = [row[1] for row in conn.execute(f"PRAGMA table_info({table})")]
+        rows = conn.execute(f"SELECT * FROM {table} LIMIT ?", (limit,)).fetchall()
+        return [dict(zip(columns, row)) for row in rows]
 
     def _ensure_column(
         self, conn: sqlite3.Connection, table: str, column: str, column_def: str, default_sql: str
@@ -622,6 +654,12 @@ class SQLiteListStore(ListStore):
         with self._connect() as conn:
             conn.execute("DELETE FROM bowling_stats WHERE league_key = ?", (league_key,))
             for stat in stats:
+                average = _coerce_sqlite_int(stat.average)
+                handicap = _coerce_sqlite_int(stat.handicap)
+                wins = _coerce_sqlite_int(stat.wins)
+                losses = _coerce_sqlite_int(stat.losses)
+                high_game = _coerce_sqlite_int(stat.high_game)
+                high_series = _coerce_sqlite_int(stat.high_series)
                 conn.execute(
                     """
                     INSERT INTO bowling_stats (
@@ -634,12 +672,12 @@ class SQLiteListStore(ListStore):
                         stat.league_key,
                         stat.team_name,
                         stat.player_name,
-                        stat.average,
-                        stat.handicap,
-                        stat.wins,
-                        stat.losses,
-                        stat.high_game,
-                        stat.high_series,
+                        average,
+                        handicap,
+                        wins,
+                        losses,
+                        high_game,
+                        high_series,
                         stat.points,
                         json.dumps(stat.raw),
                         stat.created_at,
@@ -657,14 +695,47 @@ class SQLiteListStore(ListStore):
         )
         params: List[object] = [league_key]
         if team_name:
-            query += " AND team_name = ?"
-            params.append(team_name)
+            query += " AND lower(trim(team_name)) = ?"
+            params.append(_normalize_query_value(team_name))
         if player_name:
-            query += " AND player_name = ?"
-            params.append(player_name)
+            query += " AND lower(trim(player_name)) = ?"
+            params.append(_normalize_query_value(player_name))
         query += " ORDER BY team_name ASC, player_name ASC"
         with self._connect() as conn:
             rows = conn.execute(query, params).fetchall()
+            if rows or (not player_name and not team_name):
+                return [
+                    BowlingStatState(
+                        league_key=row[0],
+                        team_name=row[1],
+                        player_name=row[2],
+                        average=row[3],
+                        handicap=row[4],
+                        wins=row[5],
+                        losses=row[6],
+                        high_game=row[7],
+                        high_series=row[8],
+                        points=row[9],
+                        raw=json.loads(row[10]),
+                        created_at=row[11],
+                        updated_at=row[12],
+                    )
+                    for row in rows
+                ]
+            fuzzy_query = (
+                "SELECT league_key, team_name, player_name, average, handicap, wins, "
+                "losses, high_game, high_series, points, raw_json, created_at, updated_at "
+                "FROM bowling_stats WHERE league_key = ?"
+            )
+            fuzzy_params: List[object] = [league_key]
+            if player_name:
+                fuzzy_query += " AND lower(player_name) LIKE ?"
+                fuzzy_params.append(f"%{_normalize_query_value(player_name)}%")
+            if team_name:
+                fuzzy_query += " AND lower(team_name) LIKE ?"
+                fuzzy_params.append(f"%{_normalize_query_value(team_name)}%")
+            fuzzy_query += " ORDER BY team_name ASC, player_name ASC"
+            rows = conn.execute(fuzzy_query, fuzzy_params).fetchall()
             return [
                 BowlingStatState(
                     league_key=row[0],
@@ -753,14 +824,15 @@ class SQLiteListStore(ListStore):
             conn.execute(
                 """
                 INSERT INTO bowling_fetches (
-                    league_key, last_fetch_at, stats_url, schedule_url, standings_url
+                    league_key, last_fetch_at, stats_url, schedule_url, standings_url, file_path
                 )
-                VALUES (?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(league_key) DO UPDATE SET
                     last_fetch_at = excluded.last_fetch_at,
                     stats_url = excluded.stats_url,
                     schedule_url = excluded.schedule_url,
-                    standings_url = excluded.standings_url
+                    standings_url = excluded.standings_url,
+                    file_path = excluded.file_path
                 """,
                 (
                     fetch.league_key,
@@ -768,6 +840,7 @@ class SQLiteListStore(ListStore):
                     fetch.stats_url,
                     fetch.schedule_url,
                     fetch.standings_url,
+                    fetch.file_path,
                 ),
             )
 
@@ -775,7 +848,7 @@ class SQLiteListStore(ListStore):
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT league_key, last_fetch_at, stats_url, schedule_url, standings_url
+                SELECT league_key, last_fetch_at, stats_url, schedule_url, standings_url, file_path
                 FROM bowling_fetches
                 WHERE league_key = ?
                 """,
@@ -789,4 +862,19 @@ class SQLiteListStore(ListStore):
                 stats_url=row[2],
                 schedule_url=row[3],
                 standings_url=row[4],
+                file_path=row[5],
             )
+
+
+def _coerce_sqlite_int(value: Optional[int]) -> Optional[int]:
+    if value is None:
+        return None
+    min_int = -9223372036854775808
+    max_int = 9223372036854775807
+    if value < min_int or value > max_int:
+        return None
+    return value
+
+
+def _normalize_query_value(value: str) -> str:
+    return " ".join(value.replace("\u00a0", " ").strip().lower().split())

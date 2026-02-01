@@ -7,6 +7,7 @@ import React, { useEffect, useState } from "react";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
+const DEBUG_MODE = process.env.NEXT_PUBLIC_DEBUG === "true";
 
 type ChatMessage = { role: string; content: string };
 type ThreadSummary = { thread_id: string; summary: string };
@@ -75,8 +76,14 @@ export default function HomePage() {
   const [bowlingPlayerName, setBowlingPlayerName] = useState("");
   const [bowlingDateFrom, setBowlingDateFrom] = useState("");
   const [bowlingDateTo, setBowlingDateTo] = useState("");
+  const [bowlingForceRefresh, setBowlingForceRefresh] = useState(false);
   const [bowlingStatus, setBowlingStatus] = useState("");
   const [bowlingOutput, setBowlingOutput] = useState<string>("");
+  const [debugDbStatus, setDebugDbStatus] = useState("");
+  const [debugDbOutput, setDebugDbOutput] = useState<string>("");
+  const [debugSql, setDebugSql] = useState("SELECT * FROM bowling_matches LIMIT 10;");
+  const [debugSqlStatus, setDebugSqlStatus] = useState("");
+  const [debugSqlOutput, setDebugSqlOutput] = useState<string>("");
 
   useEffect(() => {
     fetch(`${API_BASE_URL}/api/integrations/google/status`)
@@ -208,6 +215,16 @@ export default function HomePage() {
           </select>
         </div>
         <div className="row">
+          <label className="checkbox">
+            <input
+              type="checkbox"
+              checked={bowlingForceRefresh}
+              onChange={(event) => setBowlingForceRefresh(event.target.checked)}
+            />
+            <span>Force refresh</span>
+          </label>
+        </div>
+        <div className="row">
           <button
             type="button"
             className="button secondary"
@@ -234,7 +251,9 @@ export default function HomePage() {
               setBowlingStatus("Loading teams...");
               try {
                 const data = await fetchJson(
-                  `${API_BASE_URL}/api/bowling/${bowlingLeagueKey}/teams`
+                  `${API_BASE_URL}/api/bowling/${bowlingLeagueKey}/teams?force_refresh=${
+                    bowlingForceRefresh ? "true" : "false"
+                  }`
                 );
                 setBowlingOutput(JSON.stringify(data, null, 2));
                 setBowlingStatus("Loaded");
@@ -266,7 +285,7 @@ export default function HomePage() {
                 const data = await fetchJson(
                   `${API_BASE_URL}/api/bowling/${bowlingLeagueKey}/team-stats?team_name=${encodeURIComponent(
                     bowlingTeamName
-                  )}`
+                  )}&force_refresh=${bowlingForceRefresh ? "true" : "false"}`
                 );
                 setBowlingOutput(JSON.stringify(data, null, 2));
                 setBowlingStatus("Loaded");
@@ -298,7 +317,7 @@ export default function HomePage() {
                 const data = await fetchJson(
                   `${API_BASE_URL}/api/bowling/${bowlingLeagueKey}/player-stats?player_name=${encodeURIComponent(
                     bowlingPlayerName
-                  )}`
+                  )}&force_refresh=${bowlingForceRefresh ? "true" : "false"}`
                 );
                 setBowlingOutput(JSON.stringify(data, null, 2));
                 setBowlingStatus("Loaded");
@@ -338,6 +357,9 @@ export default function HomePage() {
               if (bowlingDateTo) {
                 params.set("date_to", bowlingDateTo);
               }
+              if (bowlingForceRefresh) {
+                params.set("force_refresh", "true");
+              }
               const query = params.toString();
               try {
                 const data = await fetchJson(
@@ -360,6 +382,76 @@ export default function HomePage() {
           <p className="meta">No bowling data loaded yet.</p>
         )}
       </section>
+
+      {DEBUG_MODE ? (
+        <section className="card">
+          <h2>Debug: Database</h2>
+          <div className="row">
+            <button
+              type="button"
+              className="button secondary"
+              onClick={async () => {
+                setDebugDbStatus("Loading...");
+                try {
+                  const data = await fetchJson(`${API_BASE_URL}/api/debug/db?limit=200`);
+                  setDebugDbOutput(JSON.stringify(data, null, 2));
+                  setDebugDbStatus("Loaded");
+                } catch (error) {
+                  setDebugDbStatus(error instanceof Error ? error.message : "Failed to load");
+                }
+              }}
+            >
+              Load DB Snapshot
+            </button>
+          </div>
+          <div className="status">{debugDbStatus}</div>
+          {debugDbOutput ? (
+            <pre className="message-content">{debugDbOutput}</pre>
+          ) : (
+            <p className="meta">No debug data loaded yet.</p>
+          )}
+          <div className="row">
+            <label className="label" htmlFor="debugSql">
+              SQL (read-only)
+            </label>
+          </div>
+          <textarea
+            id="debugSql"
+            className="input"
+            rows={4}
+            value={debugSql}
+            onChange={(event) => setDebugSql(event.target.value)}
+          />
+          <div className="row">
+            <button
+              type="button"
+              className="button secondary"
+              onClick={async () => {
+                setDebugSqlStatus("Running...");
+                try {
+                  const data = await fetchJson(`${API_BASE_URL}/api/debug/sql`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ query: debugSql }),
+                  });
+                  setDebugSqlOutput(JSON.stringify(data, null, 2));
+                  setDebugSqlStatus("Done");
+                } catch (error) {
+                  setDebugSqlStatus(error instanceof Error ? error.message : "Failed to run query");
+                }
+              }}
+            >
+              Run SQL
+            </button>
+            <div className="status">{debugSqlStatus}</div>
+          </div>
+          {debugSqlOutput ? (
+            <pre className="message-content">{debugSqlOutput}</pre>
+          ) : (
+            <p className="meta">No query results yet.</p>
+          )}
+        </section>
+      ) : null}
 
       <section className="card">
         <h2>Chat</h2>

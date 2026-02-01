@@ -23,6 +23,7 @@ class OpenAIClient:
         self._api_key = api_key or os.getenv("OPENAI_API_KEY")
         self._base_url = base_url.rstrip("/")
         self._model = model
+        self._timeout = int(os.getenv("OPENAI_TIMEOUT_SECONDS", "60"))
         self._tracer = trace.get_tracer("home_ops.llm") if trace else None
 
     def chat(
@@ -64,7 +65,7 @@ class OpenAIClient:
         )
         with span_context:
             try:
-                with urllib.request.urlopen(request, timeout=30) as response:
+                with urllib.request.urlopen(request, timeout=self._timeout) as response:
                     body = response.read().decode("utf-8")
                     return json.loads(body)
             except urllib.error.HTTPError as exc:

@@ -6,11 +6,13 @@ from .google_calendar import router as google_calendar_router
 from .google_oauth import router as google_oauth_router
 from .reminders import router as reminders_router
 from .threads import router as threads_router
+from .debug import router as debug_router
 
 __all__ = [
     "bowling_router",
     "chat_router",
     "calendar_router",
+    "debug_router",
     "gmail_router",
     "google_calendar_router",
     "google_oauth_router",

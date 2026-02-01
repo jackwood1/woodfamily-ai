@@ -85,6 +85,7 @@ class BowlingService:
                 stats_url=stats_url,
                 schedule_url=schedule_url,
                 standings_url=standings_url,
+                file_path=None,
             )
         )
         return {
@@ -98,8 +99,8 @@ class BowlingService:
             "last_fetch_at": timestamp,
         }
 
-    def list_teams(self, league_key: str) -> List[Dict[str, Any]]:
-        self._ensure_league_data(league_key)
+    def list_teams(self, league_key: str, force_refresh: bool = False) -> List[Dict[str, Any]]:
+        self._ensure_league_data(league_key, force_refresh=force_refresh)
         league = get_league(self._config, league_key)
         if league and league.get("teams"):
             return league.get("teams", [])
@@ -107,13 +108,17 @@ class BowlingService:
         teams = sorted({stat.team_name for stat in stats if stat.team_name})
         return [{"name": team} for team in teams]
 
-    def team_stats(self, league_key: str, team_name: str) -> List[Dict[str, Any]]:
-        self._ensure_league_data(league_key)
+    def team_stats(
+        self, league_key: str, team_name: str, force_refresh: bool = False
+    ) -> List[Dict[str, Any]]:
+        self._ensure_league_data(league_key, force_refresh=force_refresh)
         stats = self._store.list_bowling_stats(league_key, team_name=team_name)
         return [self._stat_to_dict(stat) for stat in stats]
 
-    def player_stats(self, league_key: str, player_name: str) -> List[Dict[str, Any]]:
-        self._ensure_league_data(league_key)
+    def player_stats(
+        self, league_key: str, player_name: str, force_refresh: bool = False
+    ) -> List[Dict[str, Any]]:
+        self._ensure_league_data(league_key, force_refresh=force_refresh)
         stats = self._store.list_bowling_stats(league_key, player_name=player_name)
         return [self._stat_to_dict(stat) for stat in stats]
 
@@ -123,8 +128,9 @@ class BowlingService:
         team_name: Optional[str] = None,
         date_from: Optional[str] = None,
         date_to: Optional[str] = None,
+        force_refresh: bool = False,
     ) -> List[Dict[str, Any]]:
-        self._ensure_league_data(league_key)
+        self._ensure_league_data(league_key, force_refresh=force_refresh)
         matches = self._store.list_bowling_matches(
             league_key, team_name=team_name, date_from=date_from, date_to=date_to
         )
@@ -153,14 +159,16 @@ class BowlingService:
             "points": stat.points,
         }
 
-    def _ensure_league_data(self, league_key: str) -> None:
+    def _ensure_league_data(self, league_key: str, force_refresh: bool = False) -> None:
         if not get_league(self._config, league_key):
             return
-        if not self._should_refresh(league_key):
+        if not self._should_refresh(league_key, force_refresh=force_refresh):
             return
         self.sync_league(league_key)
 
-    def _should_refresh(self, league_key: str) -> bool:
+    def _should_refresh(self, league_key: str, force_refresh: bool = False) -> bool:
+        if force_refresh:
+            return True
         fetch_state = self._store.get_bowling_fetch(league_key)
         if fetch_state is None:
             return True

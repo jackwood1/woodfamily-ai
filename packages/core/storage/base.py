@@ -192,6 +192,7 @@ class BowlingFetchState:
     stats_url: Optional[str]
     schedule_url: Optional[str]
     standings_url: Optional[str]
+    file_path: Optional[str]
 
 
 @runtime_checkable
