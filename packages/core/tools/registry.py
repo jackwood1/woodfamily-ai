@@ -24,7 +24,8 @@ from .google_tools import (
     gmail_get_message,
     gmail_list_unread,
 )
-from ..storage.base import ListStore
+from ..storage.base import BowlingHintStore, ListStore
+from ..bowling.hints import add_bowling_hint, list_bowling_hints, remove_bowling_hint
 
 
 ToolHandler = Callable[[Dict[str, Any]], Dict[str, Any]]
@@ -85,6 +86,82 @@ def build_list_tool_registry(store: ListStore) -> ToolRegistry:
             handler=lambda args: create_list(store, name=args["name"]),
         )
     )
+
+    if isinstance(store, BowlingHintStore):
+        registry.register(
+            ToolDefinition(
+                name="add_bowling_hint",
+                description="Add a bowling hint for routing (bowler/team/league).",
+                schema={
+                    "type": "function",
+                    "function": {
+                        "name": "add_bowling_hint",
+                        "description": "Add a bowling hint for routing (bowler/team/league).",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "hint_type": {"type": "string"},
+                                "value": {"type": "string"},
+                            },
+                            "required": ["hint_type", "value"],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                handler=lambda args: add_bowling_hint(
+                    store, hint_type=args["hint_type"], value=args["value"]
+                ),
+            )
+        )
+        registry.register(
+            ToolDefinition(
+                name="remove_bowling_hint",
+                description="Remove a bowling hint.",
+                schema={
+                    "type": "function",
+                    "function": {
+                        "name": "remove_bowling_hint",
+                        "description": "Remove a bowling hint.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "hint_type": {"type": "string"},
+                                "value": {"type": "string"},
+                            },
+                            "required": ["hint_type", "value"],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                handler=lambda args: remove_bowling_hint(
+                    store, hint_type=args["hint_type"], value=args["value"]
+                ),
+            )
+        )
+        registry.register(
+            ToolDefinition(
+                name="list_bowling_hints",
+                description="List bowling hints by type.",
+                schema={
+                    "type": "function",
+                    "function": {
+                        "name": "list_bowling_hints",
+                        "description": "List bowling hints by type.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "hint_type": {"type": "string"},
+                            },
+                            "required": [],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                handler=lambda args: list_bowling_hints(
+                    store, hint_type=args.get("hint_type")
+                ),
+            )
+        )
 
     registry.register(
         ToolDefinition(

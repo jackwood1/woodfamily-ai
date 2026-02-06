@@ -10,6 +10,7 @@ from .base import (
     BowlingMatchState,
     BowlingStatState,
     BowlingFetchState,
+    BowlingHintState,
     CalendarEventState,
     ListItem,
     ListStore,
@@ -152,6 +153,24 @@ class SQLiteListStore(ListStore):
                 """
             )
             self._ensure_column(conn, "bowling_fetches", "file_path", "TEXT", "NULL")
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS bowling_hints (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    hint_type TEXT NOT NULL,
+                    value TEXT NOT NULL,
+                    value_norm TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS bowling_hints_type_value_norm_idx
+                ON bowling_hints (hint_type, value_norm)
+                """
+            )
 
     def debug_snapshot(self, limit: int = 100) -> Dict[str, List[Dict[str, Any]]]:
         tables = [
@@ -163,6 +182,7 @@ class SQLiteListStore(ListStore):
             "bowling_stats",
             "bowling_matches",
             "bowling_fetches",
+            "bowling_hints",
         ]
         snapshot: Dict[str, List[Dict[str, Any]]] = {}
         with self._connect() as conn:
@@ -198,6 +218,9 @@ class SQLiteListStore(ListStore):
 
     def _normalize_item(self, item: str) -> str:
         return " ".join(item.strip().split())
+
+    def _normalize_hint_value(self, value: str) -> str:
+        return " ".join(value.strip().split())
 
     def _backfill_item_norm(self, conn: sqlite3.Connection) -> None:
         conn.execute(
@@ -864,6 +887,59 @@ class SQLiteListStore(ListStore):
                 standings_url=row[4],
                 file_path=row[5],
             )
+
+    def upsert_bowling_hint(self, hint: BowlingHintState) -> None:
+        value_norm = self._normalize_hint_value(hint.value).lower()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO bowling_hints (hint_type, value, value_norm, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(hint_type, value_norm) DO UPDATE SET
+                    value = excluded.value,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    hint.hint_type,
+                    hint.value,
+                    value_norm,
+                    hint.created_at,
+                    hint.updated_at,
+                ),
+            )
+
+    def delete_bowling_hint(self, hint_type: str, value: str) -> bool:
+        value_norm = self._normalize_hint_value(value).lower()
+        with self._connect() as conn:
+            cur = conn.execute(
+                """
+                DELETE FROM bowling_hints
+                WHERE hint_type = ? AND value_norm = ?
+                """,
+                (hint_type, value_norm),
+            )
+            return cur.rowcount > 0
+
+    def list_bowling_hints(
+        self, hint_type: Optional[str] = None
+    ) -> List[BowlingHintState]:
+        query = "SELECT hint_type, value, created_at, updated_at FROM bowling_hints"
+        params: List[Any] = []
+        if hint_type:
+            query += " WHERE hint_type = ?"
+            params.append(hint_type)
+        query += " ORDER BY hint_type, value_norm"
+        with self._connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [
+            BowlingHintState(
+                hint_type=row[0],
+                value=row[1],
+                created_at=row[2],
+                updated_at=row[3],
+            )
+            for row in rows
+        ]
 
 
 def _coerce_sqlite_int(value: Optional[int]) -> Optional[int]:

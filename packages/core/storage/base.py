@@ -162,6 +162,14 @@ class BowlingMatchState:
     updated_at: str
 
 
+@dataclass(frozen=True)
+class BowlingHintState:
+    hint_type: str
+    value: str
+    created_at: str
+    updated_at: str
+
+
 @runtime_checkable
 class BowlingStore(Protocol):
     def save_bowling_stats(self, league_key: str, stats: List[BowlingStatState]) -> None:
@@ -202,3 +210,15 @@ class BowlingFetchStore(Protocol):
 
     def get_bowling_fetch(self, league_key: str) -> Optional[BowlingFetchState]:
         """Return fetch metadata for a league."""
+
+
+@runtime_checkable
+class BowlingHintStore(Protocol):
+    def upsert_bowling_hint(self, hint: BowlingHintState) -> None:
+        """Insert or update a bowling hint."""
+
+    def delete_bowling_hint(self, hint_type: str, value: str) -> bool:
+        """Delete a bowling hint. Returns True if deleted."""
+
+    def list_bowling_hints(self, hint_type: Optional[str] = None) -> List[BowlingHintState]:
+        """List bowling hints by type."""

@@ -14,6 +14,7 @@ except Exception:  # pragma: no cover - optional dependency resolution
 from apps.api.routes.bowling import router as bowling_router
 from apps.api.routes.chat import router as chat_router
 from apps.api.routes.calendar import router as calendar_router
+from apps.api.routes.hints import router as hints_router
 from apps.api.routes.gmail import router as gmail_router
 from apps.api.routes.debug import router as debug_router
 from apps.api.routes.google_calendar import router as google_calendar_router
@@ -47,6 +48,7 @@ else:
 app.include_router(chat_router)
 app.include_router(calendar_router)
 app.include_router(bowling_router)
+app.include_router(hints_router)
 app.include_router(gmail_router)
 app.include_router(debug_router)
 app.include_router(google_calendar_router)
