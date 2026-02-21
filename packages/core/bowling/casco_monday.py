@@ -51,9 +51,14 @@ def get_casco_monday(
             "schedule": schedule,
         }
 
-    pdf_bytes = fetch_pdf(pdf_url)
-    _write_cache_pdf(cache_path, pdf_bytes)
-    _log_file_fetched(pdf_url, cache_path)
+    pdf_bytes = _read_cached_pdf(cache_path)
+    if not _looks_like_pdf_bytes(pdf_bytes):
+        pdf_bytes = fetch_pdf(pdf_url)
+        _write_cache_pdf(cache_path, pdf_bytes)
+        _log_file_fetched(pdf_url, cache_path)
+    if not _looks_like_pdf_bytes(pdf_bytes):
+        preview = pdf_bytes[:200].decode("utf-8", errors="replace")
+        raise RuntimeError("casco_pdf_invalid", {"url": pdf_url, "preview": preview})
     text = _extract_pdf_text(pdf_bytes)
     client = llm or OpenAIClient()
     standings_text, schedule_text = _split_sections(text)
@@ -89,14 +94,15 @@ def get_casco_monday_team_summary(
     pdf_url = os.getenv("CASCO_MONDAY_URL", DEFAULT_CASCO_MONDAY_URL)
     cache_path = _cache_path()
     fetch_state = store.get_bowling_fetch(DEFAULT_CACHE_KEY)
-    if not force_refresh and os.path.exists(cache_path):
-        with open(cache_path, "rb") as handle:
-            pdf_bytes = handle.read()
-    else:
+    pdf_bytes = _read_cached_pdf(cache_path)
+    if not _looks_like_pdf_bytes(pdf_bytes):
         pdf_bytes = fetch_pdf(pdf_url)
         _write_cache_pdf(cache_path, pdf_bytes)
         _log_file_fetched(pdf_url, cache_path)
         _upsert_fetch_state(store, DEFAULT_CACHE_KEY, pdf_url, cache_path)
+    if not _looks_like_pdf_bytes(pdf_bytes):
+        preview = pdf_bytes[:200].decode("utf-8", errors="replace")
+        raise RuntimeError("casco_pdf_invalid", {"url": pdf_url, "preview": preview})
     text = _extract_pdf_text(pdf_bytes)
     standings = _extract_standings_from_pdf(pdf_bytes)
     if not standings:
@@ -204,6 +210,17 @@ def _basename(value: Optional[str]) -> Optional[str]:
 def _write_cache_pdf(cache_path: str, pdf_bytes: bytes) -> None:
     with open(cache_path, "wb") as handle:
         handle.write(pdf_bytes)
+
+
+def _read_cached_pdf(cache_path: str) -> bytes:
+    if not os.path.exists(cache_path):
+        return b""
+    with open(cache_path, "rb") as handle:
+        return handle.read()
+
+
+def _looks_like_pdf_bytes(data: bytes) -> bool:
+    return bool(data) and data.startswith(b"%PDF")
 
 
 def _upsert_fetch_state(

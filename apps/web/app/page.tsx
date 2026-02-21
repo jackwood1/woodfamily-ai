@@ -7,7 +7,6 @@ import React, { useEffect, useState } from "react";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
-const DEBUG_MODE = process.env.NEXT_PUBLIC_DEBUG === "true";
 
 type ChatMessage = { role: string; content: string };
 type ThreadSummary = { thread_id: string; summary: string };
@@ -19,7 +18,17 @@ type GoogleStatus = {
   scopes?: string[];
   expiry?: number;
 };
-type BowlingLeague = { key: string; name: string; site?: string };
+type BowlingScheduleItem = { date?: string; time?: string | null; lane?: string | null };
+type TeamSummary = {
+  team_summary?: {
+    team?: string;
+    position?: number;
+    points?: number;
+    points_from_first?: number;
+    schedule?: BowlingScheduleItem[];
+  };
+};
+type BowlerStatsResponse = { bowlers?: Array<{ bowler?: string; team?: string; average?: number }> };
 
 async function sendChat(message: string, threadId: string) {
   const response = await fetch(`${API_BASE_URL}/chat`, {
@@ -63,6 +72,100 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   return response.json();
 }
 
+function parseNextDate(items: BowlingScheduleItem[]) {
+  if (items.length === 0) {
+    return null;
+  }
+  const now = new Date();
+  const year = now.getFullYear();
+  const parsed = items
+    .map((item) => {
+      const date = item.date || "";
+      const [monthStr, dayStr] = date.split("/");
+      const month = Number(monthStr);
+      const day = Number(dayStr);
+      if (!month || !day) {
+        return null;
+      }
+      const dateObj = new Date(year, month - 1, day);
+      return { ...item, dateObj };
+    })
+    .filter((item): item is BowlingScheduleItem & { dateObj: Date } => !!item);
+  parsed.sort((a, b) => a.dateObj.getTime() - b.dateObj.getTime());
+  return parsed.find((item) => item.dateObj >= now) || parsed[0] || null;
+}
+
+function normalizeBowlerName(raw: string) {
+  return raw
+    .replace(/'s$/i, "")
+    .replace(/[^\w .'-]+$/g, "")
+    .trim();
+}
+
+async function handleBowlingQuery(message: string) {
+  const lower = message.toLowerCase();
+  const nextMatch = lower.match(/when does ([a-z0-9 .'-]+) bowl next\??/i);
+  if (nextMatch) {
+    const target = normalizeBowlerName(nextMatch[1].trim());
+    let team = "";
+    const stats = await fetchJson<BowlerStatsResponse>(
+      `${API_BASE_URL}/api/bowling/casco/monday/bowlers?player_name=${encodeURIComponent(
+        target
+      )}`
+    );
+    team = stats.bowlers?.[0]?.team || "";
+    if (!team) {
+      team = target;
+    }
+    const summary = await fetchJson<TeamSummary>(
+      `${API_BASE_URL}/api/bowling/casco/monday/team-summary?team_name=${encodeURIComponent(
+        team
+      )}`
+    );
+    const schedule = summary.team_summary?.schedule || [];
+    const next = parseNextDate(schedule);
+    if (!next || !next.date || !next.time) {
+      return `${team} is in the Monday league, but I couldn't find the next scheduled game.`;
+    }
+    if (stats.bowlers?.[0]?.bowler) {
+      return `${stats.bowlers[0].bowler} bowls for ${team}. Next game: ${next.date} at ${next.time} on lane ${next.lane ?? "TBD"}.`;
+    }
+    return `${team} bowls next on ${next.date} at ${next.time} on lane ${next.lane ?? "TBD"}.`;
+  }
+
+  const avgMatch = lower.match(/what is ([a-z0-9 .'-]+)s average.*monday/i);
+  if (avgMatch) {
+    const bowler = normalizeBowlerName(avgMatch[1].trim());
+    const stats = await fetchJson<BowlerStatsResponse>(
+      `${API_BASE_URL}/api/bowling/casco/monday/bowlers?player_name=${encodeURIComponent(
+        bowler
+      )}`
+    );
+    const entry = stats.bowlers?.[0];
+    if (!entry) {
+      return `I couldn't find an average for ${bowler}.`;
+    }
+    return `${entry.bowler} bowls for ${entry.team}. Current average: ${entry.average ?? "N/A"}.`;
+  }
+
+  const bopoMatch = lower.match(/what is ([a-z0-9 .'-]+)s bowling average.*bopo/i);
+  if (bopoMatch) {
+    const bowler = normalizeBowlerName(bopoMatch[1].trim());
+    const stats = await fetchJson<BowlerStatsResponse>(
+      `${API_BASE_URL}/api/bowling/bopo/averages?player_name=${encodeURIComponent(
+        bowler
+      )}`
+    );
+    const entry = stats.bowlers?.[0];
+    if (!entry) {
+      return `I couldn't find a BoPo average for ${bowler}.`;
+    }
+    return `${entry.bowler} bowls for ${entry.team}. BoPo average: ${entry.average ?? "N/A"}.`;
+  }
+
+  return null;
+}
+
 export default function HomePage() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatStatus, setChatStatus] = useState("");
@@ -70,20 +173,6 @@ export default function HomePage() {
   const [threads, setThreads] = useState<ThreadSummary[]>([]);
   const [threadsStatus, setThreadsStatus] = useState("");
   const [googleStatus, setGoogleStatus] = useState<GoogleStatus | null>(null);
-  const [bowlingLeagues, setBowlingLeagues] = useState<BowlingLeague[]>([]);
-  const [bowlingLeagueKey, setBowlingLeagueKey] = useState("");
-  const [bowlingTeamName, setBowlingTeamName] = useState("");
-  const [bowlingPlayerName, setBowlingPlayerName] = useState("");
-  const [bowlingDateFrom, setBowlingDateFrom] = useState("");
-  const [bowlingDateTo, setBowlingDateTo] = useState("");
-  const [bowlingForceRefresh, setBowlingForceRefresh] = useState(false);
-  const [bowlingStatus, setBowlingStatus] = useState("");
-  const [bowlingOutput, setBowlingOutput] = useState<string>("");
-  const [debugDbStatus, setDebugDbStatus] = useState("");
-  const [debugDbOutput, setDebugDbOutput] = useState<string>("");
-  const [debugSql, setDebugSql] = useState("SELECT * FROM bowling_matches LIMIT 10;");
-  const [debugSqlStatus, setDebugSqlStatus] = useState("");
-  const [debugSqlOutput, setDebugSqlOutput] = useState<string>("");
 
   useEffect(() => {
     fetch(`${API_BASE_URL}/api/integrations/google/status`)
@@ -92,18 +181,6 @@ export default function HomePage() {
       .catch(() => setGoogleStatus({ connected: false }));
   }, []);
 
-  useEffect(() => {
-    fetchJson<BowlingLeague[]>(`${API_BASE_URL}/api/bowling/leagues`)
-      .then((data) => {
-        setBowlingLeagues(data);
-        if (data.length > 0) {
-          setBowlingLeagueKey(data[0].key);
-        }
-      })
-      .catch((error) => {
-        setBowlingStatus(error instanceof Error ? error.message : "Failed to load leagues");
-      });
-  }, []);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -117,6 +194,15 @@ export default function HomePage() {
     setChatStatus("Sending...");
     setChatMessages((prev) => [...prev, { role: "user", content: message }]);
     try {
+      const bowlingReply = await handleBowlingQuery(message);
+      if (bowlingReply) {
+        setChatMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: bowlingReply },
+        ]);
+        setChatStatus("Done");
+        return;
+      }
       const result = (await sendChat(message, threadId)) as ChatResponse;
       if (result.thread_id) {
         setThreadId(result.thread_id);
@@ -151,6 +237,7 @@ export default function HomePage() {
   return (
     <main className="container">
       <header className="header">
+        <img src="/logo.svg" alt="Home Ops Copilot logo" width={64} height={64} />
         <h1>Home Ops Copilot</h1>
         <p>Test the `/chat` endpoint and inspect tool calls.</p>
       </header>
@@ -195,263 +282,6 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="card">
-        <h2>Bowling</h2>
-        <div className="row">
-          <label className="label" htmlFor="bowlingLeague">
-            League
-          </label>
-          <select
-            id="bowlingLeague"
-            className="input"
-            value={bowlingLeagueKey}
-            onChange={(event) => setBowlingLeagueKey(event.target.value)}
-          >
-            {bowlingLeagues.map((league) => (
-              <option key={league.key} value={league.key}>
-                {league.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="row">
-          <label className="checkbox">
-            <input
-              type="checkbox"
-              checked={bowlingForceRefresh}
-              onChange={(event) => setBowlingForceRefresh(event.target.checked)}
-            />
-            <span>Force refresh</span>
-          </label>
-        </div>
-        <div className="row">
-          <button
-            type="button"
-            className="button secondary"
-            onClick={async () => {
-              setBowlingStatus("Syncing...");
-              try {
-                const data = await fetchJson(
-                  `${API_BASE_URL}/api/bowling/${bowlingLeagueKey}/sync`,
-                  { method: "POST" }
-                );
-                setBowlingOutput(JSON.stringify(data, null, 2));
-                setBowlingStatus("Synced");
-              } catch (error) {
-                setBowlingStatus(error instanceof Error ? error.message : "Sync failed");
-              }
-            }}
-          >
-            Sync League
-          </button>
-          <button
-            type="button"
-            className="button secondary"
-            onClick={async () => {
-              setBowlingStatus("Loading teams...");
-              try {
-                const data = await fetchJson(
-                  `${API_BASE_URL}/api/bowling/${bowlingLeagueKey}/teams?force_refresh=${
-                    bowlingForceRefresh ? "true" : "false"
-                  }`
-                );
-                setBowlingOutput(JSON.stringify(data, null, 2));
-                setBowlingStatus("Loaded");
-              } catch (error) {
-                setBowlingStatus(error instanceof Error ? error.message : "Failed to load teams");
-              }
-            }}
-          >
-            List Teams
-          </button>
-        </div>
-        <div className="row">
-          <input
-            className="input"
-            placeholder="Team name"
-            value={bowlingTeamName}
-            onChange={(event) => setBowlingTeamName(event.target.value)}
-          />
-          <button
-            type="button"
-            className="button secondary"
-            onClick={async () => {
-              if (!bowlingTeamName) {
-                setBowlingStatus("Enter a team name");
-                return;
-              }
-              setBowlingStatus("Loading team stats...");
-              try {
-                const data = await fetchJson(
-                  `${API_BASE_URL}/api/bowling/${bowlingLeagueKey}/team-stats?team_name=${encodeURIComponent(
-                    bowlingTeamName
-                  )}&force_refresh=${bowlingForceRefresh ? "true" : "false"}`
-                );
-                setBowlingOutput(JSON.stringify(data, null, 2));
-                setBowlingStatus("Loaded");
-              } catch (error) {
-                setBowlingStatus(error instanceof Error ? error.message : "Failed to load stats");
-              }
-            }}
-          >
-            Team Stats
-          </button>
-        </div>
-        <div className="row">
-          <input
-            className="input"
-            placeholder="Player name"
-            value={bowlingPlayerName}
-            onChange={(event) => setBowlingPlayerName(event.target.value)}
-          />
-          <button
-            type="button"
-            className="button secondary"
-            onClick={async () => {
-              if (!bowlingPlayerName) {
-                setBowlingStatus("Enter a player name");
-                return;
-              }
-              setBowlingStatus("Loading player stats...");
-              try {
-                const data = await fetchJson(
-                  `${API_BASE_URL}/api/bowling/${bowlingLeagueKey}/player-stats?player_name=${encodeURIComponent(
-                    bowlingPlayerName
-                  )}&force_refresh=${bowlingForceRefresh ? "true" : "false"}`
-                );
-                setBowlingOutput(JSON.stringify(data, null, 2));
-                setBowlingStatus("Loaded");
-              } catch (error) {
-                setBowlingStatus(error instanceof Error ? error.message : "Failed to load stats");
-              }
-            }}
-          >
-            Player Stats
-          </button>
-        </div>
-        <div className="row">
-          <input
-            className="input"
-            placeholder="Date from (YYYY-MM-DD)"
-            value={bowlingDateFrom}
-            onChange={(event) => setBowlingDateFrom(event.target.value)}
-          />
-          <input
-            className="input"
-            placeholder="Date to (YYYY-MM-DD)"
-            value={bowlingDateTo}
-            onChange={(event) => setBowlingDateTo(event.target.value)}
-          />
-          <button
-            type="button"
-            className="button secondary"
-            onClick={async () => {
-              setBowlingStatus("Loading matches...");
-              const params = new URLSearchParams();
-              if (bowlingTeamName) {
-                params.set("team_name", bowlingTeamName);
-              }
-              if (bowlingDateFrom) {
-                params.set("date_from", bowlingDateFrom);
-              }
-              if (bowlingDateTo) {
-                params.set("date_to", bowlingDateTo);
-              }
-              if (bowlingForceRefresh) {
-                params.set("force_refresh", "true");
-              }
-              const query = params.toString();
-              try {
-                const data = await fetchJson(
-                  `${API_BASE_URL}/api/bowling/${bowlingLeagueKey}/matches${query ? `?${query}` : ""}`
-                );
-                setBowlingOutput(JSON.stringify(data, null, 2));
-                setBowlingStatus("Loaded");
-              } catch (error) {
-                setBowlingStatus(error instanceof Error ? error.message : "Failed to load matches");
-              }
-            }}
-          >
-            Matches
-          </button>
-        </div>
-        <div className="status">{bowlingStatus}</div>
-        {bowlingOutput ? (
-          <pre className="message-content">{bowlingOutput}</pre>
-        ) : (
-          <p className="meta">No bowling data loaded yet.</p>
-        )}
-      </section>
-
-      {DEBUG_MODE ? (
-        <section className="card">
-          <h2>Debug: Database</h2>
-          <div className="row">
-            <button
-              type="button"
-              className="button secondary"
-              onClick={async () => {
-                setDebugDbStatus("Loading...");
-                try {
-                  const data = await fetchJson(`${API_BASE_URL}/api/debug/db?limit=200`);
-                  setDebugDbOutput(JSON.stringify(data, null, 2));
-                  setDebugDbStatus("Loaded");
-                } catch (error) {
-                  setDebugDbStatus(error instanceof Error ? error.message : "Failed to load");
-                }
-              }}
-            >
-              Load DB Snapshot
-            </button>
-          </div>
-          <div className="status">{debugDbStatus}</div>
-          {debugDbOutput ? (
-            <pre className="message-content">{debugDbOutput}</pre>
-          ) : (
-            <p className="meta">No debug data loaded yet.</p>
-          )}
-          <div className="row">
-            <label className="label" htmlFor="debugSql">
-              SQL (read-only)
-            </label>
-          </div>
-          <textarea
-            id="debugSql"
-            className="input"
-            rows={4}
-            value={debugSql}
-            onChange={(event) => setDebugSql(event.target.value)}
-          />
-          <div className="row">
-            <button
-              type="button"
-              className="button secondary"
-              onClick={async () => {
-                setDebugSqlStatus("Running...");
-                try {
-                  const data = await fetchJson(`${API_BASE_URL}/api/debug/sql`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ query: debugSql }),
-                  });
-                  setDebugSqlOutput(JSON.stringify(data, null, 2));
-                  setDebugSqlStatus("Done");
-                } catch (error) {
-                  setDebugSqlStatus(error instanceof Error ? error.message : "Failed to run query");
-                }
-              }}
-            >
-              Run SQL
-            </button>
-            <div className="status">{debugSqlStatus}</div>
-          </div>
-          {debugSqlOutput ? (
-            <pre className="message-content">{debugSqlOutput}</pre>
-          ) : (
-            <p className="meta">No query results yet.</p>
-          )}
-        </section>
-      ) : null}
 
       <section className="card">
         <h2>Chat</h2>

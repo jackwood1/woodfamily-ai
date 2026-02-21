@@ -4,6 +4,9 @@ import "./globals.css";
 export const metadata = {
   title: "Home Ops Copilot",
   description: "Admin console for Home Ops Copilot",
+  icons: {
+    icon: "/favicon.svg",
+  },
 };
 
 export default function RootLayout({
