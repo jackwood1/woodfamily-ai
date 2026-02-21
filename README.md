@@ -48,6 +48,34 @@ This agent syncs bowling stats/schedules and exposes league tools.
 
 Config:
 - Create `apps/api/data/bowling.json` (see `packages/core/bowling/sample_config.json`)
+
+## Newsletter Digest Agent (local)
+AI-powered newsletter management and digest generation.
+
+Features:
+- Detect newsletters in Gmail automatically
+- Subscribe/unsubscribe from newsletters
+- Generate AI-powered digests with LLM summarization
+- Configurable digest schedules (daily/weekly/manual)
+
+See `apps/newsletter_agent/README.md` for full documentation.
+
+**MCP Tools:**
+- `detect_newsletters()` - Scan Gmail for newsletters
+- `subscribe_newsletter()` - Add to digest subscriptions
+- `generate_digest()` - Create AI-summarized digest
+- `list_digests()` - View recent digests
+- See README for full tool list
+
+**API Routes:**
+- `GET /api/newsletters/detect` - Detect newsletters
+- `POST /api/newsletters/subscriptions` - Subscribe
+- `POST /api/newsletters/digests/generate` - Generate digest
+- See README for full API documentation
+
+**Requirements:**
+- Google OAuth for Gmail access
+- `OPENAI_API_KEY` for summarization
 - Set `BOWLING_CONFIG_PATH` if you store the file elsewhere
 
 Run:

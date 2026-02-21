@@ -14,6 +14,10 @@ from .base import (
     CalendarEventState,
     ListItem,
     ListStore,
+    NewsletterConfigState,
+    NewsletterDigestState,
+    NewsletterSubscriptionState,
+    NewsletterSummaryState,
     ReminderState,
     ThreadState,
 )
@@ -171,6 +175,56 @@ class SQLiteListStore(ListStore):
                 ON bowling_hints (hint_type, value_norm)
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS newsletter_subscriptions (
+                    id TEXT PRIMARY KEY,
+                    sender_email TEXT UNIQUE NOT NULL,
+                    sender_name TEXT,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS newsletter_digests (
+                    id TEXT PRIMARY KEY,
+                    period_start TEXT NOT NULL,
+                    period_end TEXT NOT NULL,
+                    summary TEXT NOT NULL,
+                    newsletter_count INTEGER NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS newsletter_summaries (
+                    id TEXT PRIMARY KEY,
+                    digest_id TEXT NOT NULL,
+                    message_id TEXT NOT NULL,
+                    sender TEXT NOT NULL,
+                    sender_email TEXT NOT NULL,
+                    subject TEXT NOT NULL,
+                    summary TEXT NOT NULL,
+                    received_date TEXT NOT NULL,
+                    FOREIGN KEY(digest_id) REFERENCES newsletter_digests(id)
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS newsletter_config (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    schedule TEXT NOT NULL,
+                    max_per_digest INTEGER NOT NULL,
+                    auto_generate INTEGER NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
 
     def debug_snapshot(self, limit: int = 100) -> Dict[str, List[Dict[str, Any]]]:
         tables = [
@@ -183,6 +237,10 @@ class SQLiteListStore(ListStore):
             "bowling_matches",
             "bowling_fetches",
             "bowling_hints",
+            "newsletter_subscriptions",
+            "newsletter_digests",
+            "newsletter_summaries",
+            "newsletter_config",
         ]
         snapshot: Dict[str, List[Dict[str, Any]]] = {}
         with self._connect() as conn:
@@ -940,6 +998,254 @@ class SQLiteListStore(ListStore):
             )
             for row in rows
         ]
+
+    # Newsletter storage methods
+
+    def create_subscription(self, subscription: NewsletterSubscriptionState) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO newsletter_subscriptions
+                (id, sender_email, sender_name, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    subscription.id,
+                    subscription.sender_email,
+                    subscription.sender_name,
+                    subscription.status,
+                    subscription.created_at,
+                    subscription.updated_at,
+                ),
+            )
+
+    def update_subscription(self, subscription: NewsletterSubscriptionState) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE newsletter_subscriptions
+                SET sender_name = ?, status = ?, updated_at = ?
+                WHERE sender_email = ?
+                """,
+                (
+                    subscription.sender_name,
+                    subscription.status,
+                    subscription.updated_at,
+                    subscription.sender_email,
+                ),
+            )
+
+    def get_subscription(
+        self, sender_email: str
+    ) -> Optional[NewsletterSubscriptionState]:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id, sender_email, sender_name, status, created_at, updated_at
+                FROM newsletter_subscriptions
+                WHERE sender_email = ?
+                """,
+                (sender_email,),
+            ).fetchone()
+        if not row:
+            return None
+        return NewsletterSubscriptionState(
+            id=row[0],
+            sender_email=row[1],
+            sender_name=row[2],
+            status=row[3],
+            created_at=row[4],
+            updated_at=row[5],
+        )
+
+    def list_subscriptions(
+        self, status: Optional[str] = None
+    ) -> List[NewsletterSubscriptionState]:
+        query = """
+            SELECT id, sender_email, sender_name, status, created_at, updated_at
+            FROM newsletter_subscriptions
+        """
+        params: List[Any] = []
+        if status:
+            query += " WHERE status = ?"
+            params.append(status)
+        query += " ORDER BY created_at DESC"
+
+        with self._connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [
+            NewsletterSubscriptionState(
+                id=row[0],
+                sender_email=row[1],
+                sender_name=row[2],
+                status=row[3],
+                created_at=row[4],
+                updated_at=row[5],
+            )
+            for row in rows
+        ]
+
+    def delete_subscription(self, sender_email: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                DELETE FROM newsletter_subscriptions
+                WHERE sender_email = ?
+                """,
+                (sender_email,),
+            )
+
+    def create_digest(
+        self,
+        digest: NewsletterDigestState,
+        summaries: List[NewsletterSummaryState],
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO newsletter_digests
+                (id, period_start, period_end, summary, newsletter_count, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    digest.id,
+                    digest.period_start,
+                    digest.period_end,
+                    digest.summary,
+                    digest.newsletter_count,
+                    digest.created_at,
+                ),
+            )
+            for summary in summaries:
+                conn.execute(
+                    """
+                    INSERT INTO newsletter_summaries
+                    (id, digest_id, message_id, sender, sender_email, subject, summary, received_date)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        summary.id,
+                        summary.digest_id,
+                        summary.message_id,
+                        summary.sender,
+                        summary.sender_email,
+                        summary.subject,
+                        summary.summary,
+                        summary.received_date,
+                    ),
+                )
+
+    def get_digest(
+        self, digest_id: str
+    ) -> Optional[tuple[NewsletterDigestState, List[NewsletterSummaryState]]]:
+        with self._connect() as conn:
+            digest_row = conn.execute(
+                """
+                SELECT id, period_start, period_end, summary, newsletter_count, created_at
+                FROM newsletter_digests
+                WHERE id = ?
+                """,
+                (digest_id,),
+            ).fetchone()
+
+            if not digest_row:
+                return None
+
+            summary_rows = conn.execute(
+                """
+                SELECT id, digest_id, message_id, sender, sender_email, subject, summary, received_date
+                FROM newsletter_summaries
+                WHERE digest_id = ?
+                ORDER BY received_date DESC
+                """,
+                (digest_id,),
+            ).fetchall()
+
+        digest = NewsletterDigestState(
+            id=digest_row[0],
+            period_start=digest_row[1],
+            period_end=digest_row[2],
+            summary=digest_row[3],
+            newsletter_count=digest_row[4],
+            created_at=digest_row[5],
+        )
+
+        summaries = [
+            NewsletterSummaryState(
+                id=row[0],
+                digest_id=row[1],
+                message_id=row[2],
+                sender=row[3],
+                sender_email=row[4],
+                subject=row[5],
+                summary=row[6],
+                received_date=row[7],
+            )
+            for row in summary_rows
+        ]
+
+        return (digest, summaries)
+
+    def list_digests(self, limit: int = 10) -> List[NewsletterDigestState]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, period_start, period_end, summary, newsletter_count, created_at
+                FROM newsletter_digests
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [
+            NewsletterDigestState(
+                id=row[0],
+                period_start=row[1],
+                period_end=row[2],
+                summary=row[3],
+                newsletter_count=row[4],
+                created_at=row[5],
+            )
+            for row in rows
+        ]
+
+    def get_config(self) -> Optional[NewsletterConfigState]:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT schedule, max_per_digest, auto_generate, updated_at
+                FROM newsletter_config
+                WHERE id = 1
+                """
+            ).fetchone()
+        if not row:
+            return None
+        return NewsletterConfigState(
+            schedule=row[0],
+            max_per_digest=row[1],
+            auto_generate=bool(row[2]),
+            updated_at=row[3],
+        )
+
+    def update_config(self, config: NewsletterConfigState) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO newsletter_config (id, schedule, max_per_digest, auto_generate, updated_at)
+                VALUES (1, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    schedule = excluded.schedule,
+                    max_per_digest = excluded.max_per_digest,
+                    auto_generate = excluded.auto_generate,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    config.schedule,
+                    config.max_per_digest,
+                    int(config.auto_generate),
+                    config.updated_at,
+                ),
+            )
 
 
 def _coerce_sqlite_int(value: Optional[int]) -> Optional[int]:

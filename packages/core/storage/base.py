@@ -222,3 +222,76 @@ class BowlingHintStore(Protocol):
 
     def list_bowling_hints(self, hint_type: Optional[str] = None) -> List[BowlingHintState]:
         """List bowling hints by type."""
+
+
+@dataclass(frozen=True)
+class NewsletterSubscriptionState:
+    id: str
+    sender_email: str
+    sender_name: Optional[str]
+    status: str  # 'active', 'paused', 'ignored'
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class NewsletterDigestState:
+    id: str
+    period_start: str
+    period_end: str
+    summary: str
+    newsletter_count: int
+    created_at: str
+
+
+@dataclass(frozen=True)
+class NewsletterSummaryState:
+    id: str
+    digest_id: str
+    message_id: str
+    sender: str
+    sender_email: str
+    subject: str
+    summary: str
+    received_date: str
+
+
+@dataclass(frozen=True)
+class NewsletterConfigState:
+    schedule: str  # 'daily', 'weekly', 'manual'
+    max_per_digest: int
+    auto_generate: bool
+    updated_at: str
+
+
+@runtime_checkable
+class NewsletterStore(Protocol):
+    def create_subscription(self, subscription: NewsletterSubscriptionState) -> None:
+        """Create a new newsletter subscription."""
+
+    def update_subscription(self, subscription: NewsletterSubscriptionState) -> None:
+        """Update a newsletter subscription."""
+
+    def get_subscription(self, sender_email: str) -> Optional[NewsletterSubscriptionState]:
+        """Get a subscription by sender email."""
+
+    def list_subscriptions(self, status: Optional[str] = None) -> List[NewsletterSubscriptionState]:
+        """List subscriptions, optionally filtered by status."""
+
+    def delete_subscription(self, sender_email: str) -> None:
+        """Delete a subscription."""
+
+    def create_digest(self, digest: NewsletterDigestState, summaries: List[NewsletterSummaryState]) -> None:
+        """Create a digest with newsletter summaries."""
+
+    def get_digest(self, digest_id: str) -> Optional[tuple[NewsletterDigestState, List[NewsletterSummaryState]]]:
+        """Get a digest with all its summaries."""
+
+    def list_digests(self, limit: int = 10) -> List[NewsletterDigestState]:
+        """List recent digests."""
+
+    def get_config(self) -> Optional[NewsletterConfigState]:
+        """Get newsletter configuration."""
+
+    def update_config(self, config: NewsletterConfigState) -> None:
+        """Update newsletter configuration."""
